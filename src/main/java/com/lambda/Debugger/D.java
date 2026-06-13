@@ -1790,16 +1790,7 @@ synchronized (D.class) {
     }
 
     private static Object getClassLoaderLock(Object o) {
-        return Debugger.classLoader;
-//        if (o != null) {
-//            ClassLoader cl = o.getClass().getClassLoader();
-//            if (cl != null && cl instanceof DebugifyingClassLoader) {
-//                return cl;
-//            } else {
-//                return new Object();
-//            }
-//        } else {
-//            return new Object();
-//        }
+        if (Debugger.classLoader != null) return Debugger.classLoader;
+        return D.class;
     }
 }
