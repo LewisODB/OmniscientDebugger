@@ -179,7 +179,7 @@ public final class Debugify implements Constants {
 
     static boolean alreadyDebugified;
 
-    public static void main1(String[] args) {
+    public static int main1(String[] args) {
         int nFiles = 0;
         initialize();
         calledFromDebugify = true;
@@ -202,24 +202,30 @@ public final class Debugify implements Constants {
                     String classFileName = args[i];
                     newJC = debugifyClass(javaClass, classFileName);
                     if (!alreadyDebugified) {
-                        newJC.dump(classFileName);
+                        byte[] bytes = InstrumentedClassFixer.toVerifiedClassBytes(newJC);
+                        try (FileOutputStream fos = new FileOutputStream(classFileName)) {
+                            fos.write(bytes);
+                        }
                         System.out.print("+");
                         nFiles++;
                     } else
                         System.out.print("-");
-                } else
+                } else {
                     Debugger.println(args[i] + " is not a .class file");
+                    return 1;
+                }
             }
         } catch (Exception e) {
             Debugger.println("Debugify exiting with exception: ");
             e.printStackTrace();
+            return 1;
         }
         Debugger.println(version + " debugified " + nFiles + " files.");
+        return 0;
     }
 
     public static void main(String[] args) {
-        main1(args);
-        System.exit(0);
+        System.exit(main1(args));
     } // MAIN ENDS
 
     static private boolean initialized = false;
@@ -1102,17 +1108,7 @@ public final class Debugify implements Constants {
     private static void removeUnknownAttributes() {
         Attribute[] attrs = mg.getCodeAttributes();
         for (Attribute a : attrs) {
-            // System.out.println("attr: " + a);
-            // System.out.println();
-            // int ix = a.getNameIndex();
-            // ConstantPool cp = a.getConstantPool();
-            byte tag = a.getTag();
-            // if (tag==-1) tag= Constants.CONSTANT_Utf8;
-            // Constant c = cp.getConstant(ix);
-            // String s = c.toString();
-            // if (s.equals("LocalVariableTypeTable")) {
-            if (tag == -1) {
-                // System.out.println("removing: " + a);
+            if (a.getTag() == -1) {
                 mg.removeCodeAttribute(a);
             }
         }
