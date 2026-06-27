@@ -1,0 +1,47 @@
+name: Build JAR
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  jar:
+    name: JAR (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            gradle-command: ./gradlew --no-daemon jar
+          - os: macos-latest
+            gradle-command: ./gradlew --no-daemon jar
+          - os: windows-latest
+            gradle-command: .\gradlew.bat --no-daemon jar
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build JAR
+        run: ${{ matrix.gradle-command }}
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: LewisOmniscientDebugger-${{ matrix.os }}
+          path: build/libs/LewisOmniscientDebugger.jar
+          if-no-files-found: error
