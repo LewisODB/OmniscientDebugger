@@ -962,6 +962,16 @@ public class Debugger extends JFrame {
         main(args);
     }
 
+    private static void applyRecordingStartup(boolean startTarget) {
+        if (!NO_WINDOWS) {
+            StopButton.create(startTarget, PAUSED, SHOW, INSTRUMENT);
+            return;
+        }
+        if (!PAUSED) {
+            D.enable();
+        }
+    }
+
     public static void main(String args[]) {
         final String[] args2 = args;
         main2(args);
@@ -1014,8 +1024,7 @@ public class Debugger extends JFrame {
                 // System.out.println(""+packageName);
                 //Defaults.addIOP(packageName);
             }
-            if (!NO_WINDOWS)
-                StopButton.create(START, PAUSED, SHOW, INSTRUMENT);
+            applyRecordingStartup(START);
 
             argList = new Object[1];
             argList[0] = args1;

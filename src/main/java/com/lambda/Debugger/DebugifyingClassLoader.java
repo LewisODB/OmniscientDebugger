@@ -116,6 +116,12 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
             if (Debugger.TRACE_LOADER)
                 ve.printStackTrace();
             clazz = getParent().loadClass(className);
+        } catch (IllegalStateException ise) {
+            println(spacesMinus() + "The ODB cannot instrument: " + className
+                    + ". Please report bug.\n" + ise);
+            if (Debugger.TRACE_LOADER)
+                ise.printStackTrace();
+            clazz = getParent().loadClass(className);
         }
 
         if (clazz == null)
@@ -143,7 +149,6 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
             return bytes;
         }
 
-        Class clazz;
         if (javaClass == null)
             return null;
 
@@ -156,9 +161,7 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
         javaClass = Debugify.debugifyClass(javaClass, className);
         long end = System.currentTimeMillis();
         Debugger.timeDebugifying += (end - start);
-        bytes = javaClass.getBytes();
-
-        return bytes;
+        return InstrumentedClassFixer.toVerifiedClassBytes(javaClass);
     }
 
     protected Class findClass(String className, boolean instrument) throws ClassNotFoundException {
@@ -184,7 +187,7 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
             long end = System.currentTimeMillis();
             Debugger.timeDebugifying += (end - start);
         }
-        byte[] b = javaClass.getBytes();
+        byte[] b = InstrumentedClassFixer.toVerifiedClassBytes(javaClass);
 
         int i = className.lastIndexOf('.');
         if (i != -1) {

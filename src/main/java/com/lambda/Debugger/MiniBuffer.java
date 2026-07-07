@@ -21,8 +21,11 @@ package com.lambda.Debugger;
 
 
 import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
 
+import javax.swing.AbstractAction;
 import javax.swing.JTextArea;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -54,6 +57,16 @@ public class MiniBuffer implements DocumentListener {
 	miniBuffer = mb;
 	Document d = miniBuffer.getDocument();
 	d.addDocumentListener(listener);
+	installKeyBindings();
+    }
+
+    private static void installKeyBindings() {
+	miniBuffer.getInputMap().put(KeyStroke.getKeyStroke('F', ActionEvent.CTRL_MASK), "odb-fget");
+	miniBuffer.getActionMap().put("odb-fget", new AbstractAction() {
+	    public void actionPerformed(ActionEvent e) {
+		beginFGet();
+	    }
+	});
     }
 
     public static boolean wantsInput() {

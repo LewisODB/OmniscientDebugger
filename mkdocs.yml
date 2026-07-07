@@ -1,0 +1,52 @@
+site_name: Lewis Omniscient Debugger
+site_description: Documentation for the Omniscient Debugger, a Java debugger that records program history for backward navigation.
+site_url: https://omniscientdebugger.github.io/LewisOmniscientDebugger/
+repo_url: https://github.com/OmniscientDebugger/LewisOmniscientDebugger
+repo_name: OmniscientDebugger/LewisOmniscientDebugger
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.follow
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - User Manual: user-manual/index.md
+  - Help Menu:
+      - General Help: help/general.md
+      - ENV Var Help: help/env-vars.md
+      - FGET Help: help/fget.md
+  - Development: development.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+
+plugins:
+  - search

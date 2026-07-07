@@ -1,154 +1,310 @@
-apply plugin: 'java'
-apply plugin: 'eclipse'
-apply plugin: 'maven'
-apply plugin: 'signing'
-	
-sourceCompatibility = '1.6'
-targetCompatibility = '1.6'
-[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
-
-File buildDir = file(".");
-
-//Properties props = new Properties()
-//props.load(new FileInputStream(buildDir.getAbsolutePath()+"/src/main/resources/com/neuronrobotics/sdk/config/build.properties"))
-sourceSets {
-	
-	test {
-		java {
-			srcDirs = ["test/java/src","examples/java/src" ]  // Note @Peter's comment below
-		}
-	}
-}
-manifest {
-    attributes(	
-    			"Manifest-Version": "1.0",
-    			"Created-By": "Neuron Robotics Cooperative",
-    			"Specification-Title": "LewisOmniscientDebugger",
-    			"Specification-Version": sourceCompatibility,
-    			"Specification-Vendor": "Neuron Robotics Cooperative",,
-    			"Implementation-Title": "LewisOmniscientDebugger",
-    			"Implementation-Version" : sourceCompatibility,
-    			"Implementation-Vendor": "Neuron Robotics Cooperative"
-        		
-    )
+plugins {
+    id 'java'
 }
 
-jar.archiveName = "LewisOmniscientDebugger.jar"
+group = 'com.neuronrobotics'
+version = '1.8'
 
-//apply from: 'http://gradle-plugins.mihosoft.eu/latest/vlicenseheader.gradle'
-//repairHeaders.licenseHeaderText = new File(projectDir,'./license-template.txt')
+base {
+    archivesName = 'LewisOmniscientDebugger'
+}
 
-task wrapper(type: Wrapper, description: 'Creates and deploys the Gradle wrapper to the current directory.') {
-    gradleVersion = '2.7'
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
 }
 
 repositories {
-	mavenCentral()
-	maven { url 'https://repository-bubblecloud.forge.cloudbees.com/release/'}
-	maven { url 'https://clojars.org/repo' }
-	maven { url 'https://oss.sonatype.org/content/repositories/releases/'  }
-	maven { url 'https://jline.sourceforge.net/m2repo' }
-	maven { url 'https://repo.spring.io/milestone'}
-	maven { url 'https://oss.sonatype.org/content/repositories/snapshots/'  }
-	maven { url 'https://oss.sonatype.org/service/local/staging/deploy/maven2/'  }
-	maven { url 'https://jenkinsci.artifactoryonline.com/jenkinsci/public/' }
-	maven { url 'https://plugins.gradle.org/m2/' }
+    mavenCentral()
 }
-	
+
 dependencies {
-	//TODO change as many of these as possible to Maven repositories	
-	// http://mvnrepository.com/artifact/org.apache.bcel/bcel
-	compile group: 'org.apache.bcel', name: 'bcel', version: '6.2'
-
+    implementation 'org.apache.bcel:bcel:6.2'
+    implementation 'org.ow2.asm:asm:9.7.1'
+    testImplementation 'junit:junit:4.13.2'
 }
 
-// create a fat-jar (class files plus dependencies
-// excludes VRL.jar (plugin jar files must not start with 'vrl-\\d+')
-jar {
-	
-	// remove the security files (from mail.jar / activation.jar) so that the jar will be executable.
-	
-	doFirst { 
-	    // dependencies except VRL
-	    from (configurations.runtime.asFileTree.
-	        filter({file->return !file.name.startsWith("vrl-0")}).
-	        files.collect { zipTree(it) } ){
-	    	exclude 'META-INF/MANIFEST.MF'
-			exclude 'META-INF/*.SF'
-			exclude 'META-INF/*.DSA'
-			exclude 'META-INF/*.RSA'
-	    }
-	}
+def manifestAttributes = [
+    'Manifest-Version'       : '1.0',
+    'Created-By'             : 'Neuron Robotics Cooperative',
+    'Specification-Title'    : 'LewisOmniscientDebugger',
+    'Specification-Version'  : java.targetCompatibility,
+    'Specification-Vendor'   : 'Neuron Robotics Cooperative',
+    'Implementation-Title'   : 'LewisOmniscientDebugger',
+    'Implementation-Version' : java.targetCompatibility,
+    'Implementation-Vendor'  : 'Neuron Robotics Cooperative',
+    'Main-Class'             : 'com.lambda.Debugger.Debugger',
+]
+
+def debugifyClassPatterns = [
+    'Demo*.class',
+    'QuickSortNonThreaded*.class',
+    'Rewrite*.class',
+    'Analysis.class',
+    'PrefixEntry.class',
+    'WordEntry.class',
+]
+
+def launchProgramClasses = { File dir ->
+    debugifyClassPatterns.collectMany { pattern ->
+        fileTree(dir: dir, include: pattern).files
+    }.sort { it.absolutePath }
 }
 
-group = "com.neuronrobotics"
-archivesBaseName = "LewisOmniscientDebugger"
-version = sourceCompatibility
+def debuggerDebuggerGeneratedSourceDir = layout.buildDirectory.dir('generated/sources/debuggerDebugger/java')
+def debuggerDebuggerMainClassesDir = layout.buildDirectory.dir('debuggerDebugger/mainClasses')
+def debuggerDebuggerWorkDir = layout.buildDirectory.dir('debuggerDebugger/work')
+def debuggerDebuggerSourceReplacements = [
+    ['com.lambda', 'lambda'],
+    ['edu.insa.LSD', 'insa.LSD'],
+    ['Debugger Controller', 'DebuggerDebugger Controller'],
+    ['Omniscient Debugger', 'Omniscient DebuggerDebugger'],
+    ['getProperty("', 'getProperty("D'],
+    ['debuggerDefaults', 'ddebuggerDefaults'],
+]
+def debuggerDebuggerExcludeClasses = [
+    'My*.class',
+    'Debugify.class',
+    'VectorD.class',
+    'Clock.class',
+]
 
-task javadocJar(type: Jar) {
-	classifier = 'javadoc'
-	from javadoc
+sourceSets {
+    debuggerDebugger {
+        java.srcDir(debuggerDebuggerGeneratedSourceDir)
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += output + compileClasspath
+    }
 }
 
-task sourcesJar(type: Jar) {
-	classifier = 'sources'
-	from sourceSets.main.allSource
-}
-/*
+tasks.register('generateDebuggerDebuggerSources') {
+    description = 'Generate the package-rewritten ODB sources used to debug ODB itself'
+    group = 'build'
 
-*/
-artifacts {
-	archives javadocJar
-	archives  sourcesJar
-	archives  jar
+    def debuggerSources = fileTree('src/main/java/com/lambda/Debugger') {
+        include '*.java'
+    }
+    def lsdSources = fileTree('src/main/java/edu/insa/LSD') {
+        include '*.java'
+    }
+
+    inputs.files(debuggerSources, lsdSources)
+    outputs.dir(debuggerDebuggerGeneratedSourceDir)
+
+    doLast {
+        def outputDir = debuggerDebuggerGeneratedSourceDir.get().asFile
+        delete outputDir
+
+        def rewriteSource = { File source, File target ->
+            target.parentFile.mkdirs()
+            def text = source.getText('UTF-8')
+            debuggerDebuggerSourceReplacements.each { replacement ->
+                text = text.replace(replacement[0], replacement[1])
+            }
+            target.setText(text, 'UTF-8')
+        }
+
+        debuggerSources.files.each { source ->
+            rewriteSource(source, new File(outputDir, "lambda/Debugger/${source.name}"))
+        }
+        lsdSources.files.each { source ->
+            rewriteSource(source, new File(outputDir, "insa/LSD/${source.name}"))
+        }
+    }
 }
 
-/*
-signing {
-	sign configurations.archives
+tasks.named('compileDebuggerDebuggerJava') {
+    dependsOn tasks.named('generateDebuggerDebuggerSources')
 }
-uploadArchives {
-	repositories {
-	  mavenDeployer {
-		beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
-  
-		repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-		  authentication(userName: ossrhUsername, password: ossrhPassword)
-		}
-  
-		snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
-		  authentication(userName: ossrhUsername, password: ossrhPassword)
-		}
-  
-		pom.project {
-		  name 'Java Bowler'
-		  packaging 'jar'
-		  // optionally artifactId can be defined here
-		  description 'A command line utility for accesing the bowler framework.'
-		  url 'http://neuronrobotics.com'
-  
-		  scm {
-			connection 			'scm:git:https://github.com/OmniscientDebugger/LewisOmniscientDebugger.git'
-			developerConnection 'scm:git:https://github.com/OmniscientDebugger/LewisOmniscientDebugger.git'
-			url 'https://github.com/NeuronRobotics/java-bowler'
-		  }
-  
-		  licenses {
-			license {
-			  name 'The Apache License, Version 2.0'
-			  url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
-			}
-		  }
-  
-		  developers {
-			developer {
-			  id 'madhephaestus'
-			  name 'Kevin Harrington'
-			  email 'mad.hephaestus@gmail.com'
-			}
-		  }
-		}
-	  }
-	}
-  }
-*/
+
+tasks.register('prepareDebuggerDebuggerWorkDir') {
+    outputs.dir(debuggerDebuggerWorkDir)
+
+    doLast {
+        debuggerDebuggerWorkDir.get().asFile.mkdirs()
+    }
+}
+
+tasks.register('debugifyLaunchPrograms', JavaExec) {
+    dependsOn tasks.named('compileJava')
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.lambda.Debugger.Debugify'
+
+    def debugifyOutput = new ByteArrayOutputStream()
+    standardOutput = debugifyOutput
+    errorOutput = debugifyOutput
+
+    doFirst {
+        def dir = file("${layout.buildDirectory.get()}/classes/java/main/com/lambda/Debugger")
+        args = launchProgramClasses(dir)*.absolutePath
+        if (args.isEmpty()) {
+            throw new GradleException("No launch program classes matched for debugification in ${dir}")
+        }
+    }
+    doLast {
+        def output = debugifyOutput.toString('UTF-8')
+        if (!output.isBlank()) {
+            logger.lifecycle(output.trim())
+        }
+        if (executionResult.get().exitValue != 0 || output.contains('Debugify exiting with exception')) {
+            throw new GradleException("Debugify failed while preparing launch programs")
+        }
+        if (!(output =~ /debugified \d+ files\./).find()) {
+            throw new GradleException("Debugify did not report how many files it processed")
+        }
+    }
+}
+
+tasks.register('debugifyDebuggerDebuggerLaunchPrograms', JavaExec) {
+    description = 'Pre-instrument launch programs in the package-rewritten ODB'
+    group = 'build'
+    dependsOn tasks.named('compileDebuggerDebuggerJava')
+    dependsOn tasks.named('prepareDebuggerDebuggerWorkDir')
+    classpath = sourceSets.debuggerDebugger.runtimeClasspath
+    mainClass = 'lambda.Debugger.Debugify'
+    workingDir = debuggerDebuggerWorkDir.get().asFile
+
+    def debugifyOutput = new ByteArrayOutputStream()
+    standardOutput = debugifyOutput
+    errorOutput = debugifyOutput
+
+    doFirst {
+        def dir = file("${layout.buildDirectory.get()}/classes/java/debuggerDebugger/lambda/Debugger")
+        args = launchProgramClasses(dir)*.absolutePath
+        if (args.isEmpty()) {
+            throw new GradleException("No launch program classes matched for debugification in ${dir}")
+        }
+    }
+    doLast {
+        def output = debugifyOutput.toString('UTF-8')
+        if (!output.isBlank()) {
+            logger.lifecycle(output.trim())
+        }
+        if (executionResult.get().exitValue != 0 || output.contains('Debugify exiting with exception')) {
+            throw new GradleException("Debugify failed while preparing debugger-debugger launch programs")
+        }
+        if (!(output =~ /debugified \d+ files\./).find()) {
+            throw new GradleException("Debugify did not report how many debugger-debugger launch files it processed")
+        }
+    }
+}
+
+tasks.register('copyMainClassesForDebuggerDebugger', Sync) {
+    dependsOn tasks.named('debugifyLaunchPrograms')
+    from sourceSets.main.output.classesDirs
+    into debuggerDebuggerMainClassesDir
+}
+
+tasks.register('debugifyDebuggerDebuggerMainClasses', JavaExec) {
+    description = 'Instrument copied ODB classes with the package-rewritten ODB'
+    group = 'build'
+    dependsOn tasks.named('copyMainClassesForDebuggerDebugger')
+    dependsOn tasks.named('debugifyDebuggerDebuggerLaunchPrograms')
+    dependsOn tasks.named('prepareDebuggerDebuggerWorkDir')
+    classpath = sourceSets.debuggerDebugger.runtimeClasspath
+    mainClass = 'lambda.Debugger.Debugify'
+    workingDir = debuggerDebuggerWorkDir.get().asFile
+
+    def debugifyOutput = new ByteArrayOutputStream()
+    standardOutput = debugifyOutput
+    errorOutput = debugifyOutput
+
+    doFirst {
+        def classRoot = debuggerDebuggerMainClassesDir.get().asFile
+        def debuggerClasses = fileTree(new File(classRoot, 'com/lambda/Debugger')).matching {
+            include '*.class'
+            exclude debuggerDebuggerExcludeClasses
+        }
+        def lsdClasses = fileTree(new File(classRoot, 'edu/insa/LSD')).matching {
+            include '*.class'
+        }
+        args = (debuggerClasses.files + lsdClasses.files).sort { it.absolutePath }*.absolutePath
+        if (args.isEmpty()) {
+            throw new GradleException("No ODB classes matched for debugger-debugger instrumentation in ${classRoot}")
+        }
+    }
+    doLast {
+        def output = debugifyOutput.toString('UTF-8')
+        if (!output.isBlank()) {
+            logger.lifecycle(output.trim())
+        }
+        if (executionResult.get().exitValue != 0 || output.contains('Debugify exiting with exception')) {
+            throw new GradleException("Debugify failed while preparing debugger-debugger classes")
+        }
+        if (!(output =~ /debugified \d+ files\./).find()) {
+            throw new GradleException("Debugify did not report how many debugger-debugger classes it processed")
+        }
+    }
+}
+
+tasks.named('jar', Jar) {
+    dependsOn tasks.named('debugifyLaunchPrograms')
+    archiveFileName = 'LewisOmniscientDebugger.jar'
+    manifest.attributes(manifestAttributes)
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from {
+        configurations.runtimeClasspath.collect { dep ->
+            dep.isDirectory() ? dep : zipTree(dep)
+        }
+    }
+
+    exclude 'META-INF/MANIFEST.MF'
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+}
+
+tasks.register('debuggerDebuggerJar', Jar) {
+    description = 'Build an ODB jar that can debug the ODB codebase'
+    group = 'build'
+    dependsOn tasks.named('debugifyDebuggerDebuggerMainClasses')
+    dependsOn tasks.named('processResources')
+    archiveFileName = 'LewisOmniscientDebugger-debugger-debugger.jar'
+    manifest.attributes(manifestAttributes + ['Main-Class': 'lambda.Debugger.Debugger'])
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from(debuggerDebuggerMainClassesDir)
+    from(sourceSets.debuggerDebugger.output)
+    from(sourceSets.main.output.resourcesDir)
+    from {
+        configurations.runtimeClasspath.collect { dep ->
+            dep.isDirectory() ? dep : zipTree(dep)
+        }
+    }
+
+    exclude 'META-INF/MANIFEST.MF'
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+}
+
+tasks.named('javadoc') {
+    options.encoding = 'UTF-8'
+    options.addStringOption('Xdoclint:none', '-quiet')
+    failOnError = false
+}
+
+tasks.named('test') {
+    exclude '**/VerifyRecordingTest.class'
+}
+
+tasks.register('verifyDemoRecordings', Test) {
+    description = 'Run ODB demo recording checks (manual; not part of check)'
+    group = 'verification'
+    dependsOn tasks.named('jar')
+    dependsOn tasks.named('testClasses')
+
+    def jarFile = tasks.named('jar', Jar).get().archiveFile
+    def mainClasses = sourceSets.main.output.classesDirs.files
+    classpath = sourceSets.test.runtimeClasspath.filter { !mainClasses.contains(it) } + files(jarFile)
+    testClassesDirs = sourceSets.test.output.classesDirs
+    include '**/VerifyRecordingTest.class'
+}

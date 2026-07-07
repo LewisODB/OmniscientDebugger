@@ -55,6 +55,18 @@ one, please email me.
 
 See manual [here](http://omniscientdebugger.github.io/ODBUserManual.html) Enjoy!
 
+# Documentation
+
+The project documentation site is built with MkDocs Material.
+
+```
+python3 -m venv .venv-docs
+source .venv-docs/bin/activate
+pip install -r requirements-docs.txt
+mkdocs serve
+mkdocs build --strict
+```
+
 # Development
 Here is how to build and run the debug the debugger step
 ```
@@ -72,4 +84,3 @@ contributions, bugs, and feature requests, please email me -- I enjoy hearing yo
 
   --Bil Lewis <bil@lambdacs.com>
    18 Feb 2007
-
