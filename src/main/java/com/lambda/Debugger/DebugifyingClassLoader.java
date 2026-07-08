@@ -41,6 +41,9 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
         dontInstrument.add("java.");
         dontInstrument.add("sun.");
         dontInstrument.add("apple.");
+        dontInstrument.add("com.apple.");
+        dontInstrument.add("com.sun.");
+        dontInstrument.add("jdk.");
         dontInstrument.add("javax.");
         dontInstrument.add("JAVAX.");
         dontInstrument.add("org.apache.bcel");
@@ -97,8 +100,7 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
         if (clazz != null)
             return clazz;
 
-        if ((!className.startsWith("javax.xml."))
-                && (dontInstrument(className) || (!Debugger.INSTRUMENT))) {
+        if (shouldDelegateToParent(className)) {
             clazz = getParent().loadClass(className);
             if (Debugger.TRACE_LOADER)
                 println("loaded via parent: " + getParent() + " " + className);
@@ -130,6 +132,14 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
         if (resolve)
             resolveClass(clazz);
         return clazz;
+    }
+
+    private boolean shouldDelegateToParent(String className) {
+        if (className.startsWith("javax.xml."))
+            return false;
+
+        return dontInstrument(className) || (!Debugger.INSTRUMENT)
+                || Defaults.instrumentOnlyExcludes(className, true);
     }
 
     public static byte[] debugify(String className, byte[] bytes) {
