@@ -3,6 +3,17 @@ Thank you for downloading the Omniscient Debugger (the ODB), the Java debugger t
 "backwards in time" so you can examine your program's execution.
 Also please visit the project [website](http://omniscientdebugger.github.io/)
 
+# Provenance
+
+The Omniscient Debugger was originally written by Bil Lewis. This repository
+continues that work under the LewisODB organization.
+
+This codebase was restarted from the community-maintained
+[OmniscientDebugger/LewisOmniscientDebugger](https://github.com/OmniscientDebugger/LewisOmniscientDebugger)
+repository, which preserved and modernized the project after the original
+distribution. We gratefully acknowledge that work and the contributors whose
+history is preserved in Git.
+
 # System Requirements
 ODB 1.4 works on code complied for JDK 1.3 and 1.4. ODB 1.5 works on code compiled for JDK 1.5. 
 I have tested it on 1.6 and it works. Code compiled for Java 7 and up use invokedetatch, which seems to cause problems at the moment. See [Issue](https://github.com/OmniscientDebugger/LewisOmniscientDebugger/issues/1):  The Jar's compiled for 1.6 and older do work on the 1.8 JVM. 
@@ -70,7 +81,7 @@ mkdocs build --strict
 # Development
 Here is how to build and run the debug the debugger step
 ```
-git clone https://github.com/OmniscientDebugger/LewisOmniscientDebugger.git
+git clone https://github.com/LewisODB/OmniscientDebugger.git
 
 gradle jar
 
