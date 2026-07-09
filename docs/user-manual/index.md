@@ -289,8 +289,8 @@ Here is a sample. All of the lines may have duplicate entires (e.g., the DontIns
     StartPattern:
     StopPattern:
     SourceDirectory:    
-    OnlyInstrument:         "org.apache"
-    OnlyInstrument:         "fr.emn.info.eaop.cps"
+    OnlyInstrument:         "org.apache."
+    OnlyInstrument:         "fr.emn.info.eaop.cps."
     DontInstrument:         "recoder.java.declaration.TypeDeclaration"
     DontInstrumentMethod:       "*   toString"
     DontInstrumentMethod:       "*   valueOf"
@@ -303,7 +303,7 @@ Here is a sample. All of the lines may have duplicate entires (e.g., the DontIns
 
 You may request some objects to include a field value in their print string by setting the user selected field as above. The field choosen must be a primitive and must not change.
 
-The ODB will write out a "`DidntInstrument/OnlyInstrument`" line for every single class loaded. This makes it easier to change the set of classes being instrumented. By default, only the classes in the package of the "main" method are instrumented.
+The ODB will write out a "`DidntInstrument/OnlyInstrument`" line for every single class loaded. This makes it easier to change the set of classes being instrumented. By default, only the classes in the package of the "main" method are instrumented. A trailing dot means a package prefix, such as `"java_programs."`; package-only lists let the runtime loader delegate non-matching classes to the parent loader.
 
 ## Finding the Source Code
 

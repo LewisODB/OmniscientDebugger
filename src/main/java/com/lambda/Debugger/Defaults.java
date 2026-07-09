@@ -179,6 +179,35 @@ public class Defaults {
     static private void addInstrumentOnly(String value){	// "com.foo"
 	instrumentOnlyPackages.add(getString(value));
     }
+    static boolean instrumentOnlyExcludes(String cName, boolean packagePrefixesOnly) {
+	if (packagePrefixesOnly && !instrumentOnlyEntriesArePackagePrefixes())
+	    return false;
+
+	int len = instrumentOnlyPackages.size();
+	if (len == 0)
+	    return false;
+
+	for (int i = 0; i < len; i++) {
+	    String iOnly = (String) instrumentOnlyPackages.elementAt(i);
+	    if (iOnly.equals("")) {
+		if (cName.indexOf(".") == -1)
+		    return false;
+	    } else if (cName.startsWith(iOnly))
+		return false;
+	}
+	if (!didntInstrument.contains(cName))
+	    didntInstrument.add(cName);
+	return true;
+    }
+    static private boolean instrumentOnlyEntriesArePackagePrefixes() {
+	int len = instrumentOnlyPackages.size();
+	for (int i = 0; i < len; i++) {
+	    String iOnly = (String) instrumentOnlyPackages.elementAt(i);
+	    if (!(iOnly.equals("") || iOnly.endsWith(".")))
+		return false;
+	}
+	return true;
+    }
     static private void addDidntInstrument(String value){	// "com.foo.UnparentedToo"
 	didntInstrument.add(getString(value));
     }
@@ -301,6 +330,7 @@ public class Defaults {
 	    w.write("# SourceDirectory:       If sources can't be found normally, look here.\n");
 	    w.write("# OnlyInstrument:        Only classes which match this prefix will be instrumented.\n");
 	    w.write("# OnlyInstrument:        \"\" means default package only. No entry means everything.\n");
+	    w.write("# OnlyInstrument:        Trailing-dot package prefixes let the runtime loader delegate non-matches.\n");
 	    w.write("# UserSelectedField:     This instance variable (a final String) will be appended to the display string\n");
 	    w.write("# UserSelectedField:     \"com.lambda.Thing name\"  ->   <Thing_23 John>\n");
 	    w.write("# SpecialFormatter:      com.lambda.Debugger.SpecialTimeStampFormatter\n");

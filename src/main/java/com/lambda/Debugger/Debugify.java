@@ -166,7 +166,7 @@ public final class Debugify implements Constants {
             NO_ATHROW = false, NO_CATCH = false, NO_INVOKESTATIC = false,
             NO_NEW = false, NO_AASTORE = false, NO_PREVIOUS = false,
             NO_LOCKS = false, NO_WAITS = false, DONT_REPLACE_VECTOR = false;
-    static VectorD dontRecord, dontInstrument, instrumentOnlyPackages;
+    static VectorD dontRecord, dontInstrument;
     static CodeExceptionGen[] ceg;
     static String classPackageName, className, classNoNumbers;
 
@@ -291,7 +291,6 @@ public final class Debugify implements Constants {
         // Read the file for methods not to record
         dontInstrument = Defaults.dontInstrument;
         // Read the file for methods not to instrument
-        instrumentOnlyPackages = Defaults.instrumentOnlyPackages;
     }
 
     public static JavaClass debugifyClass(JavaClass javaClass1,
@@ -569,24 +568,7 @@ public final class Debugify implements Constants {
     static boolean dontProcessPackage(String cName) {
         if (calledFromDebugify)
             return false; // If this is a direct request, do it!
-        int len = instrumentOnlyPackages.size();
-        if (len == 0)
-            return false;
-
-        for (int i = 0; i < len; i++) {
-            String iOnly = (String) instrumentOnlyPackages.elementAt(i);
-            // Debugger.println("only methods: " + cName + "."+ "? startswith "
-            // + iOnly);
-            if (iOnly.equals("")) {
-                int dot = cName.indexOf(".");
-                if (dot == -1)
-                    return false;
-            } else if (cName.startsWith(iOnly))
-                return false;
-        }
-        if (!Defaults.didntInstrument.contains(cName))
-            Defaults.didntInstrument.add(cName);
-        return true;
+        return Defaults.instrumentOnlyExcludes(cName, false);
     }
 
     static boolean dontProcessMethod(VectorD cmPairs, String mName,
