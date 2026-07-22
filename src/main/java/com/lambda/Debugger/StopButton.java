@@ -97,9 +97,16 @@ public class StopButton extends JFrame {
         try {
             SwingUtilities.invokeAndWait(r);
         } catch (InterruptedException ie) {
-        }// impossible
-        catch (java.lang.reflect.InvocationTargetException ie) {
-        }// impossible
+            if (IntegrationState.isActive()) {
+                Thread.currentThread().interrupt();
+                throw IntegrationState.internalFailed("ODB controller startup was interrupted.", ie);
+            }
+        } catch (java.lang.reflect.InvocationTargetException ie) {
+            if (IntegrationState.isActive()) {
+                Throwable cause = ie.getCause() == null ? ie : ie.getCause();
+                throw IntegrationState.internalFailed("Could not open the ODB controller.", cause);
+            }
+        }
     }
 
     public static void runButton(boolean startTarget, boolean paused,

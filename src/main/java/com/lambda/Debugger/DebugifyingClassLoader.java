@@ -113,17 +113,29 @@ public class DebugifyingClassLoader extends java.lang.ClassLoader {
         try {
             clazz = findClass(className, instrument);
         } catch (VerifyError ve) {
+            if (IntegrationState.isActive())
+                throw IntegrationState.instrumentationFailed(className, ve);
             println(spacesMinus() + "The ODB cannot instrument: " + className
                     + ". Please report bug.\n" + ve);
             if (Debugger.TRACE_LOADER)
                 ve.printStackTrace();
             clazz = getParent().loadClass(className);
         } catch (IllegalStateException ise) {
+            if (IntegrationState.isActive())
+                throw IntegrationState.instrumentationFailed(className, ise);
             println(spacesMinus() + "The ODB cannot instrument: " + className
                     + ". Please report bug.\n" + ise);
             if (Debugger.TRACE_LOADER)
                 ise.printStackTrace();
             clazz = getParent().loadClass(className);
+        } catch (RuntimeException re) {
+            if (IntegrationState.isActive())
+                throw IntegrationState.instrumentationFailed(className, re);
+            throw re;
+        } catch (LinkageError le) {
+            if (IntegrationState.isActive())
+                throw IntegrationState.instrumentationFailed(className, le);
+            throw le;
         }
 
         if (clazz == null)

@@ -22,9 +22,8 @@ package com.lambda.Debugger;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 
 
@@ -67,9 +66,11 @@ public class Defaults {
     public static boolean readDefaults() {
 	if (alreadyRead) return firstRun;
 	alreadyRead = true;
+	String resolvedDefaultsFile = IntegrationState.defaultsFile(defaultsFile);
 	try {
 		if (!"com.lambda".startsWith("com")) SpecialFormatters.add("lambda.Debugger.SpecialTimeStampFormatter");
-	    BufferedReader br = new BufferedReader(new FileReader(defaultsFile));
+	    BufferedReader br = new BufferedReader(new InputStreamReader(
+		    IntegrationState.defaultsInput(resolvedDefaultsFile)));
 	    Debugger.println("Reading .debuggerDefaults file...");
 	    String line;
 	    while ((line = br.readLine()) != null) {
@@ -124,6 +125,10 @@ public class Defaults {
 	    return true;
 	}
 	catch (Exception e) {
+	    if (IntegrationState.isActive()) {
+		throw IntegrationState.fatal("DEFAULTS_IO", "Could not read ODB defaults.",
+			e.getClass().getName(), e.getMessage(), 1);
+	    }
 	    Debugger.println("Problem loading defaults file: "+e + ". Aborting load.");
 	    D.println("");
 	    return false;
@@ -316,8 +321,10 @@ public class Defaults {
     }
 
     static public void writeDefaults(){
+	String resolvedDefaultsFile = IntegrationState.defaultsFile(defaultsFile);
 	try {
-	    BufferedWriter w = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(defaultsFile)));
+	    BufferedWriter w = new BufferedWriter(new OutputStreamWriter(
+		    IntegrationState.defaultsOutput(resolvedDefaultsFile)));
 	    w.write("# ODB Defaults "+ Debugger.version +" -- You may edit by hand. See Manual for details\n\n");
 	    w.write("#                        Class & method names must be complete. '*' must be freestanding.\n");
 	    w.write("# DidntInstrument:       This is informative only. (You may change to InstrumentOnly.)\n");
@@ -364,6 +371,10 @@ public class Defaults {
 	    w.close();
 	}
 	catch (IOException e) {
+	    if (IntegrationState.isActive()) {
+		throw IntegrationState.fatal("DEFAULTS_IO", "Could not write ODB defaults.",
+			e.getClass().getName(), e.getMessage(), 1);
+	    }
 	    Debugger.message("Could not save file " + defaultsFile, true);
 	    return;
 	}

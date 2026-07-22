@@ -559,6 +559,7 @@ public final class TimeStamp {
 	istamps[index] = type | threadIndexUnshifted | slIndex;
 	index++;
 	nTSCreated++;
+	IntegrationState.timestampAdded(nTSCreated, eott());
 	return index-1;
     
 	//    return(addStamp(sl, type, threadIndexUnshifted));
@@ -600,6 +601,7 @@ public final class TimeStamp {
 	istamps[index] = type | threadIndexUnshifted | slIndex;
 	index++;
 	nTSCreated++;
+	IntegrationState.timestampAdded(nTSCreated, eott());
 	return index-1;
     }
 
@@ -645,6 +647,11 @@ public final class TimeStamp {
 	    }
 	}
 	System.err.println("Too many threads. "+tid+" The debugger can only handle " + MAX_THREADS);
+	if (IntegrationState.isActive()) {
+	    throw IntegrationState.internalFailed(
+		    "ODB exceeded its supported thread count.",
+		    new IllegalStateException("Maximum threads: " + MAX_THREADS));
+	}
 	System.exit(1);
 	return(-1);
     }

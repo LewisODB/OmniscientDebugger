@@ -2519,6 +2519,9 @@ public final class Debugify implements Constants {
         } catch (TargetLostException e) {
             Debugger.println("Retargeting failed: " + className + " from " + ih
                     + " to " + firstIHInPatch);
+            if (IntegrationState.isActive()) {
+                throw IntegrationState.instrumentationFailed(className, e);
+            }
             System.exit(1);
         }
         return;

@@ -370,24 +370,38 @@ public class DebuggerCommand implements Serializable, Runnable {
 
    public static void writeHistory() {
      try {
-       ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(Debugger.programName+ ".debuggerCommands"));
+       ObjectOutputStream oos = new ObjectOutputStream(
+               IntegrationState.commandHistoryOutput(Debugger.programName));
        oos.writeObject(commandHistoryList);
        oos.close();
        Debugger.message("Saved history to "+Debugger.programName+ ".debuggerCommands.", false);
      }
-     catch (IOException e) {Debugger.message("Couldn't save history " + e, true);}
+     catch (IOException e) {
+       if (IntegrationState.isActive())
+         throw IntegrationState.stateIoFailed("write command history", e);
+       Debugger.message("Couldn't save history " + e, true);
+     }
    }
      
 
    
    public static void readHistory() {
 	    try {
-	      ObjectInputStream ois = new ObjectInputStream(new FileInputStream(Debugger.programName+ ".debuggerCommands"));
+	      ObjectInputStream ois = new ObjectInputStream(
+	              IntegrationState.commandHistoryInput(Debugger.programName));
 	      commandHistoryList = (DebuggerCommandHistoryList)ois.readObject();
 	      ois.close();
 	    }
-	    catch (IOException e) {Debugger.message("Couldn't read history " + e, true);}
-	    catch (ClassNotFoundException e) {Debugger.message("Couldn't read history " + e, true);}
+	    catch (IOException e) {
+	      if (IntegrationState.isActive())
+	        throw IntegrationState.stateIoFailed("read command history", e);
+	      Debugger.message("Couldn't read history " + e, true);
+	    }
+	    catch (ClassNotFoundException e) {
+	      if (IntegrationState.isActive())
+	        throw IntegrationState.stateIoFailed("read command history", e);
+	      Debugger.message("Couldn't read history " + e, true);
+	    }
    }
 
    public static void reset() {
