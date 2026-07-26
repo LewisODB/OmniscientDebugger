@@ -1,0 +1,376 @@
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
+import org.gradle.api.tasks.bundling.Compression
+
+def configureReproducibleArchive = { AbstractArchiveTask archiveTask ->
+    archiveTask.preserveFileTimestamps = false
+    archiveTask.reproducibleFileOrder = true
+    archiveTask.filePermissions {
+        unix('rw-r--r--')
+    }
+    archiveTask.dirPermissions {
+        unix('rwxr-xr-x')
+    }
+}
+
+configureReproducibleArchive(tasks.named('jar', Jar).get())
+configureReproducibleArchive(tasks.named('debuggerDebuggerJar', Jar).get())
+
+def sourceCommit = {
+    def marker = file('SOURCE-COMMIT')
+    def value
+    if (marker.isFile()) {
+        value = marker.getText('UTF-8').trim()
+    } else {
+        def output = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-parse', 'HEAD'
+            standardOutput = output
+        }
+        value = output.toString('UTF-8').trim()
+    }
+    if (!(value ==~ /[0-9a-f]{40}/)) {
+        throw new GradleException("Invalid source commit: ${value}")
+    }
+    value
+}
+def sha256 = { File artifact ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    artifact.withInputStream { input ->
+        def buffer = new byte[8192]
+        for (int read = input.read(buffer); read != -1; read = input.read(buffer)) {
+            digest.update(buffer, 0, read)
+        }
+    }
+    digest.digest().encodeHex().toString()
+}
+def sourceCommitFile = layout.buildDirectory.file('generated/release/SOURCE-COMMIT')
+def generateSourceCommit = tasks.register('generateSourceCommit') {
+    inputs.property('sourceCommit', providers.provider { sourceCommit() })
+    outputs.file(sourceCommitFile)
+    doLast {
+        def output = sourceCommitFile.get().asFile
+        output.parentFile.mkdirs()
+        output.setText(sourceCommit() + '\n', 'UTF-8')
+    }
+}
+def sourceArchiveFile = tasks.register('sourceArchive', Tar) {
+    description = 'Build deterministic corresponding source for the ODB runtime'
+    group = 'distribution'
+    compression = Compression.GZIP
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    archiveFileName = providers.provider { "odb-source-${sourceCommit()}.tar.gz" }
+    configureReproducibleArchive(delegate)
+
+    dependsOn 'verifyReleaseCheckout'
+    dependsOn generateSourceCommit
+
+    from(rootDir) {
+        include '.debuggerDefaults'
+        include 'COPYING'
+        include 'README.md'
+        include 'build.gradle'
+        include 'settings.gradle'
+        include 'gradle.lockfile'
+        include 'gradlew.bat'
+        include 'gradle/**'
+        include 'src/**'
+        include 'docs/legal/**'
+        include 'verification/**'
+    }
+    from('gradlew') {
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    from(sourceCommitFile)
+}
+
+tasks.register('verifyReleaseCheckout') {
+    description = 'Require a clean Git checkout for release artifacts'
+    group = 'verification'
+
+    doLast {
+        if (!file('.git').exists()) {
+            throw new GradleException('Release artifacts require a Git checkout')
+        }
+        def output = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'status', '--porcelain', '--untracked-files=all'
+            standardOutput = output
+        }
+        if (!output.toString('UTF-8').trim().isEmpty()) {
+            throw new GradleException('Release artifacts require a clean worktree')
+        }
+        sourceCommit()
+    }
+}
+
+tasks.register('verifySourceArchive') {
+    description = 'Verify corresponding-source contents and exclusions'
+    group = 'verification'
+    dependsOn sourceArchiveFile
+
+    doLast {
+        def archive = sourceArchiveFile.get().archiveFile.get().asFile
+        def tree = tarTree(resources.gzip(archive))
+        def relativeNames = []
+        tree.visit { details ->
+            if (!details.directory) {
+                relativeNames.add(details.relativePath.pathString)
+            }
+        }
+        def required = [
+            '.debuggerDefaults',
+            'COPYING',
+            'SOURCE-COMMIT',
+            'build.gradle',
+            'settings.gradle',
+            'gradle.lockfile',
+            'gradlew',
+            'gradlew.bat',
+            'gradle/verification-metadata.xml',
+            'gradle/wrapper/gradle-wrapper.jar',
+            'gradle/wrapper/gradle-wrapper.properties',
+            'src/main/java/com/lambda/Debugger/IntegrationLauncher.java',
+            'src/test/java/com/lambda/Debugger/IntegrationLauncherProcessTest.java',
+            'docs/legal/COLLECTION-PROVENANCE.md',
+            'verification/odb-runtime-osv.json',
+        ]
+        required.each { name ->
+            if (!relativeNames.contains(name)) {
+                throw new GradleException("Source archive lacks ${name}")
+            }
+        }
+        def forbidden = relativeNames.find { name ->
+            name.startsWith('build/')
+                    || name.startsWith('.git/')
+                    || name.startsWith('.gradle/')
+                    || name.endsWith('LewisOmniscientDebugger-1.5.jar')
+                    || (name.endsWith('.jar') && name != 'gradle/wrapper/gradle-wrapper.jar')
+        }
+        if (forbidden != null) {
+            throw new GradleException("Source archive contains forbidden entry ${forbidden}")
+        }
+        def commitEntry = tree.matching { include 'SOURCE-COMMIT' }.singleFile
+        if (commitEntry.getText('UTF-8').trim() != sourceCommit()) {
+            throw new GradleException('Source archive commit marker is incorrect')
+        }
+    }
+}
+
+def releaseMetadataFile = layout.buildDirectory.file('generated/release/odb-release.json')
+def runtimeSbomFile = layout.buildDirectory.file('reports/odb-runtime.cdx.json')
+def vulnerabilityEvidence = file('verification/odb-runtime-osv.json')
+def canonicalEnvironment = file('gradle/canonical-build.properties')
+def collectionProvenance = file('docs/legal/COLLECTION-PROVENANCE.md')
+
+tasks.register('generateReleaseMetadata') {
+    description = 'Generate deterministic ODB release metadata'
+    group = 'distribution'
+    dependsOn tasks.named('jar')
+    dependsOn sourceArchiveFile
+    dependsOn tasks.named('generateRuntimeSbom')
+    inputs.file(tasks.named('jar', Jar).flatMap { it.archiveFile })
+    inputs.file(sourceArchiveFile.flatMap { it.archiveFile })
+    inputs.file(runtimeSbomFile)
+    inputs.file(vulnerabilityEvidence)
+    inputs.file(canonicalEnvironment)
+    inputs.property('sourceCommit', providers.provider { sourceCommit() })
+    outputs.file(releaseMetadataFile)
+
+    doLast {
+        def runtime = tasks.named('jar', Jar).get().archiveFile.get().asFile
+        def source = sourceArchiveFile.get().archiveFile.get().asFile
+        def sbom = runtimeSbomFile.get().asFile
+        def environment = new Properties()
+        canonicalEnvironment.withInputStream { environment.load(it) }
+        def environmentValues = new TreeMap()
+        environment.each { key, value -> environmentValues[key.toString()] = value.toString() }
+        def dependencies = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts.collect {
+            def id = it.moduleVersion.id
+            "${id.group}:${it.name}:${id.version}".toString()
+        }.sort()
+        def metadata = [
+            sourceCommit             : sourceCommit(),
+            runtime                  : [name: runtime.name, sha256: sha256(runtime)],
+            source                   : [name: source.name, sha256: sha256(source)],
+            javaClassVersion         : 52,
+            integrationProtocol      : 1,
+            dependencies             : dependencies,
+            sbomSha256               : sha256(sbom),
+            vulnerabilityEvidence    : [
+                name   : vulnerabilityEvidence.name,
+                sha256 : sha256(vulnerabilityEvidence),
+            ],
+            canonicalBuildEnvironment: environmentValues,
+            buildCommand             : './gradlew --no-daemon clean verifyCanonicalRelease',
+        ]
+        def output = releaseMetadataFile.get().asFile
+        output.parentFile.mkdirs()
+        output.setText(
+                groovy.json.JsonOutput.prettyPrint(
+                        groovy.json.JsonOutput.toJson(metadata)) + '\n',
+                'UTF-8')
+    }
+}
+
+def checksumsFile = layout.buildDirectory.file('generated/release/SHA256SUMS')
+tasks.register('generateReleaseChecksums') {
+    description = 'Generate sorted checksums for ODB release inputs'
+    group = 'distribution'
+    dependsOn tasks.named('generateReleaseMetadata')
+    dependsOn tasks.named('prepareRuntimeLegal')
+    inputs.file(tasks.named('jar', Jar).flatMap { it.archiveFile })
+    inputs.file(sourceArchiveFile.flatMap { it.archiveFile })
+    inputs.file(releaseMetadataFile)
+    inputs.file(runtimeSbomFile)
+    inputs.file(vulnerabilityEvidence)
+    inputs.file('COPYING')
+    inputs.file(collectionProvenance)
+    inputs.dir(layout.buildDirectory.dir('generated/runtime-legal'))
+    inputs.file('src/main/resources/META-INF/third-party/asm/LICENSE.txt')
+    outputs.file(checksumsFile)
+
+    doLast {
+        def artifacts = [
+            [name: tasks.named('jar', Jar).get().archiveFile.get().asFile.name,
+             file: tasks.named('jar', Jar).get().archiveFile.get().asFile],
+            [name: sourceArchiveFile.get().archiveFile.get().asFile.name,
+             file: sourceArchiveFile.get().archiveFile.get().asFile],
+            [name: 'odb-release.json', file: releaseMetadataFile.get().asFile],
+            [name: 'odb-runtime.cdx.json', file: runtimeSbomFile.get().asFile],
+            [name: 'odb-runtime-osv.json', file: vulnerabilityEvidence],
+            [name: 'COPYING', file: file('COPYING')],
+            [name: 'COLLECTION-PROVENANCE.md', file: collectionProvenance],
+        ]
+        def runtimeLegal = layout.buildDirectory.dir('generated/runtime-legal').get().asFile
+        fileTree(runtimeLegal).files.sort { it.absolutePath }.each { legal ->
+            artifacts.add([
+                name: "third-party/${runtimeLegal.toPath().relativize(legal.toPath())}".replace('\\', '/'),
+                file: legal,
+            ])
+        }
+        artifacts.add([
+            name: 'third-party/asm/LICENSE.txt',
+            file: file('src/main/resources/META-INF/third-party/asm/LICENSE.txt'),
+        ])
+        def output = checksumsFile.get().asFile
+        output.parentFile.mkdirs()
+        output.setText(artifacts.sort { it.name }.collect {
+            "${sha256(it.file)}  ${it.name}"
+        }.join('\n') + '\n', 'UTF-8')
+    }
+}
+
+tasks.register('releaseBundle', Sync) {
+    description = 'Collect the reproducible ODB runtime and release evidence'
+    group = 'distribution'
+    dependsOn tasks.named('verifyReleaseCheckout')
+    dependsOn tasks.named('generateReleaseChecksums')
+    into layout.buildDirectory.dir('release')
+
+    from(tasks.named('jar', Jar).map { it.archiveFile })
+    from(sourceArchiveFile.map { it.archiveFile })
+    from(releaseMetadataFile)
+    from(checksumsFile)
+    from(runtimeSbomFile)
+    from(vulnerabilityEvidence)
+    from('COPYING')
+    from(collectionProvenance)
+    from(layout.buildDirectory.dir('generated/runtime-legal')) {
+        into 'third-party'
+    }
+    from('src/main/resources/META-INF/third-party/asm/LICENSE.txt') {
+        into 'third-party/asm'
+    }
+}
+
+def rebuildRoots = [
+    layout.buildDirectory.dir('verification/rebuild-one'),
+    layout.buildDirectory.dir('verification/rebuild-two'),
+]
+def rebuildTasks = rebuildRoots.withIndex().collect { rebuildRoot, index ->
+    def extractTask = tasks.register("extractSourceArchive${index + 1}", Sync) {
+        dependsOn sourceArchiveFile
+        from {
+            tarTree(resources.gzip(sourceArchiveFile.get().archiveFile.get().asFile))
+        }
+        into rebuildRoot
+    }
+    tasks.register("buildSourceArchive${index + 1}", Exec) {
+        dependsOn extractTask
+        inputs.file(sourceArchiveFile.flatMap { it.archiveFile })
+        workingDir rebuildRoot
+        commandLine './gradlew', '--offline', '--no-daemon', 'clean', 'jar', 'verifyRuntimeArtifact'
+        outputs.file(rebuildRoot.map { it.file('build/libs/LewisOmniscientDebugger.jar') })
+    }
+}
+
+tasks.register('verifyReproducibleRuntime') {
+    description = 'Compare two isolated source-archive rebuilds with the runtime JAR'
+    group = 'verification'
+    dependsOn tasks.named('jar')
+    dependsOn tasks.named('verifySourceArchive')
+    dependsOn rebuildTasks
+
+    doLast {
+        def expected = tasks.named('jar', Jar).get().archiveFile.get().asFile
+        def expectedSha = sha256(expected)
+        rebuildRoots.each { root ->
+            def rebuilt = root.get().file('build/libs/LewisOmniscientDebugger.jar').asFile
+            def rebuiltSha = sha256(rebuilt)
+            if (rebuiltSha != expectedSha) {
+                throw new GradleException(
+                        "Source rebuild digest ${rebuiltSha} differs from ${expectedSha}")
+            }
+        }
+    }
+}
+
+tasks.register('verifyCanonicalBuildEnvironment') {
+    description = 'Verify the pinned Linux and JDK 8 release environment'
+    group = 'verification'
+    inputs.file(canonicalEnvironment)
+
+    doLast {
+        def expected = new Properties()
+        canonicalEnvironment.withInputStream { expected.load(it) }
+        def actual = [
+            'os.name'             : System.getProperty('os.name'),
+            'os.arch'             : System.getProperty('os.arch'),
+            'java.version'        : System.getProperty('java.version'),
+            'java.runtime.version': System.getProperty('java.runtime.version'),
+            'java.vendor'         : System.getProperty('java.vendor'),
+            'file.encoding'       : System.getProperty('file.encoding'),
+            'gradle.version'      : gradle.gradleVersion,
+        ]
+        actual.each { key, value ->
+            if (value != expected.getProperty(key)) {
+                throw new GradleException(
+                        "Canonical build requires ${key}=${expected.getProperty(key)}, found ${value}")
+            }
+        }
+        ['LC_ALL', 'TZ'].each { name ->
+            def key = "environment.${name}"
+            if (System.getenv(name) != expected.getProperty(key)) {
+                throw new GradleException(
+                        "Canonical build requires ${name}=${expected.getProperty(key)}, "
+                                + "found ${System.getenv(name)}")
+            }
+        }
+    }
+}
+
+tasks.register('verifyCanonicalRelease') {
+    description = 'Run finite canonical ODB release gates'
+    group = 'verification'
+    dependsOn tasks.named('verifyCanonicalBuildEnvironment')
+    dependsOn tasks.named('verifyReproducibleRuntime')
+    dependsOn tasks.named('verifyRuntimeDependencies')
+    dependsOn tasks.named('verifyRuntimeArtifact')
+    dependsOn tasks.named('verifyCollectionProvenance')
+    dependsOn tasks.named('test')
+    dependsOn tasks.named('verifyRuntimeTests')
+    dependsOn tasks.named('verifyDemoRecordings')
+    dependsOn tasks.named('releaseBundle')
+}

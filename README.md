@@ -36,11 +36,11 @@ compile group: 'com.neuronrobotics', name: 'LewisOmniscientDebugger', version: '
 # Usage
 If you normally run your program on UNIX like this:
 
-`` % java com.lambda.tests.TestMyArrayList ``
+`` % java your.package.Main ``
 
 You can run the debugger like this:
 
-`` % java -cp build/libs/LewisOmniscientDebugger.jar:$CLASSPATH com.lambda.Debugger.Debugger com.lambda.tests.TestMyArrayList ``
+`` % java -cp build/libs/LewisOmniscientDebugger.jar:$CLASSPATH com.lambda.Debugger.Debugger your.package.Main ``
 
 There are alias files and .BAT files that allow you to type this:
 

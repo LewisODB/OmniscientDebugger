@@ -96,7 +96,9 @@ tasks.register('generateRuntimeSbom') {
         ]
         def output = runtimeSbomFile.get().asFile
         output.parentFile.mkdirs()
-        output.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(bom)) + System.lineSeparator()
+        output.setText(
+                groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(bom)) + '\n',
+                'UTF-8')
     }
 }
 
@@ -143,6 +145,7 @@ tasks.register('verifyRuntimeDependencies') {
     description = 'Verify the locked ODB runtime dependency graph and Java 8 compatibility'
     group = 'verification'
     dependsOn tasks.named('generateRuntimeSbom')
+    inputs.file('verification/odb-runtime-osv.json')
 
     doLast {
         def artifacts = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
@@ -170,7 +173,9 @@ tasks.register('verifyRuntimeDependencies') {
                     input.readUnsignedShort()
                     def majorVersion = input.readUnsignedShort()
                     if (majorVersion > 52) {
-                        throw new GradleException("${runtimeCoordinate(artifact)} requires class-file version ${majorVersion}, above Java 8")
+                        throw new GradleException(
+                                "${runtimeCoordinate(artifact)} requires class-file version "
+                                        + "${majorVersion}, above Java 8")
                     }
                 } finally {
                     input.close()
@@ -186,6 +191,26 @@ tasks.register('verifyRuntimeDependencies') {
                 || sbom.specVersion != '1.5'
                 || sbomCoordinates(sbom) != expectedCoordinates) {
             throw new GradleException('Generated CycloneDX SBOM differs from the runtime graph')
+        }
+
+        def vulnerabilityEvidence = new groovy.json.JsonSlurper()
+                .parse(file('verification/odb-runtime-osv.json'))
+        def expectedPurls = artifacts.collect {
+            def id = it.moduleVersion.id
+            "pkg:maven/${id.group}/${it.name}@${id.version}".toString()
+        }.sort()
+        def evidencePurls = vulnerabilityEvidence.packages.collect { it.purl }.sort()
+        if (vulnerabilityEvidence.schemaVersion != 1
+                || evidencePurls != expectedPurls) {
+            throw new GradleException(
+                    'OSV evidence differs from the approved runtime graph')
+        }
+        def reportedVulnerabilities = vulnerabilityEvidence.packages.collectMany {
+            it.vulnerabilities ?: []
+        }
+        if (!reportedVulnerabilities.isEmpty()) {
+            throw new GradleException(
+                    "OSV evidence reports runtime vulnerabilities: ${reportedVulnerabilities}")
         }
     }
 }
@@ -209,9 +234,64 @@ tasks.register('verifyRuntimeArtifact') {
         ]
         def zip = new java.util.zip.ZipFile(jarFile)
         try {
+            def requiredEntries = [
+                'com/lambda/Debugger/Debugger.class',
+                'com/lambda/Debugger/IntegrationLauncher.class',
+                'com/lambda/Debugger/IntegrationState.class',
+            ]
+            requiredEntries.each { entry ->
+                def requiredEntry = zip.getEntry(entry)
+                if (requiredEntry == null) {
+                    throw new GradleException("Runtime JAR lacks ${entry}")
+                }
+                def requiredInput = new DataInputStream(zip.getInputStream(requiredEntry))
+                try {
+                    requiredInput.readInt()
+                    requiredInput.readUnsignedShort()
+                    if (requiredInput.readUnsignedShort() != 52) {
+                        throw new GradleException(
+                                "${entry} is not compiled for Java 8 class version 52")
+                    }
+                } finally {
+                    requiredInput.close()
+                }
+            }
             expectedEntries.each { entry ->
                 if (zip.getEntry(entry) == null) {
                     throw new GradleException("Runtime JAR lacks ${entry}")
+                }
+            }
+            def forbiddenEntryPatterns = [
+                ~/^com\/lambda\/tests\//,
+                ~/^outside\//,
+                ~/^org\/junit\//,
+                ~/^META-INF\/versions\//,
+                ~/(^|\/)module-info\.class$/,
+                ~/\.(so|dll|dylib|jnilib)$/,
+                ~/LewisOmniscientDebugger-1\.5\.jar$/,
+            ]
+            zip.entries().each { entry ->
+                if (forbiddenEntryPatterns.any { pattern ->
+                    pattern.matcher(entry.name).find()
+                }) {
+                    throw new GradleException("Runtime JAR contains forbidden entry ${entry.name}")
+                }
+                if (entry.name.endsWith('.class')) {
+                    def classInput = new DataInputStream(zip.getInputStream(entry))
+                    try {
+                        if (classInput.readInt() != -889275714) {
+                            throw new GradleException("${entry.name} is not a valid class file")
+                        }
+                        classInput.readUnsignedShort()
+                        def majorVersion = classInput.readUnsignedShort()
+                        if (majorVersion > 52) {
+                            throw new GradleException(
+                                    "${entry.name} uses class-file version ${majorVersion}, "
+                                            + 'above Java 8')
+                        }
+                    } finally {
+                        classInput.close()
+                    }
                 }
             }
             def input = zip.getInputStream(zip.getEntry('META-INF/odb-runtime.cdx.json'))

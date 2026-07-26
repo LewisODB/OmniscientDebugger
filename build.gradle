@@ -60,6 +60,9 @@ def launchProgramClasses = { File dir ->
 def debuggerDebuggerGeneratedSourceDir = layout.buildDirectory.dir('generated/sources/debuggerDebugger/java')
 def debuggerDebuggerMainClassesDir = layout.buildDirectory.dir('debuggerDebugger/mainClasses')
 def debuggerDebuggerWorkDir = layout.buildDirectory.dir('debuggerDebugger/work')
+def pristineRuntimeClassesDir = layout.buildDirectory.dir('runtime/pristineClasses')
+def instrumentedRuntimeClassesDir = layout.buildDirectory.dir('runtime/instrumentedClasses')
+def runtimeInstrumentationWorkDir = layout.buildDirectory.dir('runtime/work')
 def debuggerDebuggerSourceReplacements = [
     ['com.lambda', 'lambda'],
     ['edu.insa.LSD', 'insa.LSD'],
@@ -82,6 +85,9 @@ sourceSets {
         runtimeClasspath += output + compileClasspath
     }
 }
+
+def compiledMainClassesDirs = files(sourceSets.main.output.classesDirs.files)
+sourceSets.main.output.setClassesDirs(files(instrumentedRuntimeClassesDir))
 
 tasks.register('generateDebuggerDebuggerSources') {
     description = 'Generate the package-rewritten ODB sources used to debug ODB itself'
@@ -131,17 +137,43 @@ tasks.register('prepareDebuggerDebuggerWorkDir') {
     }
 }
 
-tasks.register('debugifyLaunchPrograms', JavaExec) {
+tasks.register('stageRuntimeClasses', Sync) {
     dependsOn tasks.named('compileJava')
-    classpath = sourceSets.main.runtimeClasspath
+    from compiledMainClassesDirs
+    into pristineRuntimeClassesDir
+}
+
+def debugifyLaunchPrograms = tasks.register('debugifyLaunchPrograms', JavaExec) {
+    dependsOn tasks.named('stageRuntimeClasses')
+    classpath = files(instrumentedRuntimeClassesDir) + configurations.runtimeClasspath
     mainClass = 'com.lambda.Debugger.Debugify'
+    workingDir = runtimeInstrumentationWorkDir.get().asFile
+
+    inputs.dir(pristineRuntimeClassesDir)
+    inputs.file('.debuggerDefaults')
+    inputs.property('debugifyClassPatterns', debugifyClassPatterns)
+    outputs.dir(instrumentedRuntimeClassesDir)
+    outputs.dir(runtimeInstrumentationWorkDir)
 
     def debugifyOutput = new ByteArrayOutputStream()
     standardOutput = debugifyOutput
     errorOutput = debugifyOutput
 
     doFirst {
-        def dir = file("${layout.buildDirectory.get()}/classes/java/main/com/lambda/Debugger")
+        def classesDir = instrumentedRuntimeClassesDir.get().asFile
+        delete classesDir
+        copy {
+            from pristineRuntimeClassesDir
+            into classesDir
+        }
+        def workDir = runtimeInstrumentationWorkDir.get().asFile
+        delete workDir
+        workDir.mkdirs()
+        copy {
+            from '.debuggerDefaults'
+            into workDir
+        }
+        def dir = new File(classesDir, 'com/lambda/Debugger')
         args = launchProgramClasses(dir)*.absolutePath
         if (args.isEmpty()) {
             throw new GradleException("No launch program classes matched for debugification in ${dir}")
@@ -160,6 +192,7 @@ tasks.register('debugifyLaunchPrograms', JavaExec) {
         }
     }
 }
+sourceSets.main.output.classesDirs.builtBy(debugifyLaunchPrograms)
 
 tasks.register('debugifyDebuggerDebuggerLaunchPrograms', JavaExec) {
     description = 'Pre-instrument launch programs in the package-rewritten ODB'
@@ -197,7 +230,7 @@ tasks.register('debugifyDebuggerDebuggerLaunchPrograms', JavaExec) {
 
 tasks.register('copyMainClassesForDebuggerDebugger', Sync) {
     dependsOn tasks.named('debugifyLaunchPrograms')
-    from sourceSets.main.output.classesDirs
+    from instrumentedRuntimeClassesDir
     into debuggerDebuggerMainClassesDir
 }
 
@@ -245,16 +278,26 @@ tasks.register('debugifyDebuggerDebuggerMainClasses', JavaExec) {
 
 tasks.named('jar', Jar) {
     dependsOn tasks.named('debugifyLaunchPrograms')
+    dependsOn tasks.named('processResources')
     archiveFileName = 'LewisOmniscientDebugger.jar'
     manifest.attributes(manifestAttributes)
 
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    duplicatesStrategy = DuplicatesStrategy.FAIL
 
     from {
-        configurations.runtimeClasspath.collect { dep ->
-            dep.isDirectory() ? dep : zipTree(dep)
-        }
+        configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                .sort { artifact ->
+                    def id = artifact.moduleVersion.id
+                    "${id.group}:${artifact.name}:${id.version}".toString()
+                }
+                .collect { zipTree(it.file) }
     }
+    exclude 'com/lambda/tests/**'
+    exclude 'edu/insa/LSD/Test*.class'
+    exclude 'module-info.class'
+    exclude 'META-INF/versions/**'
+    exclude 'META-INF/LICENSE*'
+    exclude 'META-INF/NOTICE*'
     exclude 'META-INF/MANIFEST.MF'
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
@@ -269,17 +312,26 @@ tasks.register('debuggerDebuggerJar', Jar) {
     archiveFileName = 'LewisOmniscientDebugger-debugger-debugger.jar'
     manifest.attributes(manifestAttributes + ['Main-Class': 'lambda.Debugger.Debugger'])
 
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    duplicatesStrategy = DuplicatesStrategy.FAIL
 
     from(debuggerDebuggerMainClassesDir)
     from(sourceSets.debuggerDebugger.output)
     from(sourceSets.main.output.resourcesDir)
     from {
-        configurations.runtimeClasspath.collect { dep ->
-            dep.isDirectory() ? dep : zipTree(dep)
-        }
+        configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                .sort { artifact ->
+                    def id = artifact.moduleVersion.id
+                    "${id.group}:${artifact.name}:${id.version}".toString()
+                }
+                .collect { zipTree(it.file) }
     }
 
+    exclude 'com/lambda/tests/**'
+    exclude 'edu/insa/LSD/Test*.class'
+    exclude 'module-info.class'
+    exclude 'META-INF/versions/**'
+    exclude 'META-INF/LICENSE*'
+    exclude 'META-INF/NOTICE*'
     exclude 'META-INF/MANIFEST.MF'
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
@@ -309,4 +361,18 @@ tasks.register('verifyDemoRecordings', Test) {
     include '**/VerifyRecordingTest.class'
 }
 
+tasks.register('verifyRuntimeTests', Test) {
+    description = 'Run finite ODB unit and adapter tests against the runtime JAR'
+    group = 'verification'
+    dependsOn tasks.named('jar')
+    dependsOn tasks.named('testClasses')
+
+    def jarFile = tasks.named('jar', Jar).get().archiveFile
+    def mainClasses = sourceSets.main.output.classesDirs.files
+    classpath = sourceSets.test.runtimeClasspath.filter { !mainClasses.contains(it) } + files(jarFile)
+    testClassesDirs = sourceSets.test.output.classesDirs
+    exclude '**/VerifyRecordingTest.class'
+}
+
 apply from: 'gradle/collection-provenance.gradle'
+apply from: 'gradle/reproducible-release.gradle'
