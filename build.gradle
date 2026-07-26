@@ -35,13 +35,10 @@ apply from: 'gradle/runtime-provenance.gradle'
 
 def manifestAttributes = [
     'Manifest-Version'       : '1.0',
-    'Created-By'             : 'Neuron Robotics Cooperative',
     'Specification-Title'    : 'LewisOmniscientDebugger',
     'Specification-Version'  : java.targetCompatibility,
-    'Specification-Vendor'   : 'Neuron Robotics Cooperative',
     'Implementation-Title'   : 'LewisOmniscientDebugger',
     'Implementation-Version' : java.targetCompatibility,
-    'Implementation-Vendor'  : 'Neuron Robotics Cooperative',
     'Main-Class'             : 'com.lambda.Debugger.Debugger',
 ]
 
@@ -311,3 +308,5 @@ tasks.register('verifyDemoRecordings', Test) {
     testClassesDirs = sourceSets.test.output.classesDirs
     include '**/VerifyRecordingTest.class'
 }
+
+apply from: 'gradle/collection-provenance.gradle'
