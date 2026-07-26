@@ -40,7 +40,7 @@ If you normally run your program on UNIX like this:
 
 You can run the debugger like this:
 
-`` % java -cp LewisOmniscientDebugger-1.5.jar:$CLASSPATH com.lambda.Debugger.Debugger com.lambda.tests.TestMyArrayList ``
+`` % java -cp build/libs/LewisOmniscientDebugger.jar:$CLASSPATH com.lambda.Debugger.Debugger com.lambda.tests.TestMyArrayList ``
 
 There are alias files and .BAT files that allow you to type this:
 

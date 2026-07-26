@@ -2,17 +2,6 @@ def arrayListHistoryClassesDir = layout.buildDirectory.dir('verification/array-l
 def debuggerDebuggerGeneratedSourceDir = tasks.named('generateDebuggerDebuggerSources').map {
     it.outputs.files.singleFile
 }
-def sha256 = { File artifact ->
-    def digest = java.security.MessageDigest.getInstance('SHA-256')
-    artifact.withInputStream { input ->
-        def buffer = new byte[8192]
-        for (int read = input.read(buffer); read != -1; read = input.read(buffer)) {
-            digest.update(buffer, 0, read)
-        }
-    }
-    digest.digest().encodeHex().toString()
-}
-
 tasks.register('prepareArrayListHistoryTarget', Sync) {
     dependsOn tasks.named('testClasses')
     from(sourceSets.test.output.classesDirs) {
@@ -96,7 +85,7 @@ tasks.register('verifyCollectionProvenance') {
                     }
                 }
                 if (zip.entries().find { it.name.endsWith('LewisOmniscientDebugger-1.5.jar') }) {
-                    throw new GradleException("${jarFile.name} embeds the retained historical binary")
+                    throw new GradleException("${jarFile.name} embeds the historical binary")
                 }
             } finally {
                 zip.close()
@@ -104,9 +93,8 @@ tasks.register('verifyCollectionProvenance') {
         }
 
         def legacyJar = file('LewisOmniscientDebugger-1.5.jar')
-        def expectedLegacySha = 'eecdc0d2cfbb95fb91f5e15ce414d524a5f26f01776c7fcbffe9d698657b3cf2'
-        if (!legacyJar.isFile() || sha256(legacyJar) != expectedLegacySha) {
-            throw new GradleException('Retained historical JAR is missing or changed')
+        if (legacyJar.exists()) {
+            throw new GradleException('Historical JAR must not remain in the source tree')
         }
 
         def rewrittenNames = [
