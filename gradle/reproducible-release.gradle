@@ -15,10 +15,13 @@ def configureReproducibleArchive = { AbstractArchiveTask archiveTask ->
 configureReproducibleArchive(tasks.named('jar', Jar).get())
 configureReproducibleArchive(tasks.named('debuggerDebuggerJar', Jar).get())
 
+def injectedSourceCommit = providers.gradleProperty('odbSourceCommit')
 def sourceCommit = {
     def marker = file('SOURCE-COMMIT')
     def value
-    if (marker.isFile()) {
+    if (injectedSourceCommit.isPresent()) {
+        value = injectedSourceCommit.get()
+    } else if (marker.isFile()) {
         value = marker.getText('UTF-8').trim()
     } else {
         def output = new ByteArrayOutputStream()
@@ -73,6 +76,7 @@ def sourceArchiveFile = tasks.register('sourceArchive', Tar) {
         include 'gradle.lockfile'
         include 'gradlew.bat'
         include 'gradle/**'
+        include 'scripts/**'
         include 'src/**'
         include 'docs/legal/**'
         include 'verification/**'
@@ -90,16 +94,18 @@ tasks.register('verifyReleaseCheckout') {
     group = 'verification'
 
     doLast {
-        if (!file('.git').exists()) {
-            throw new GradleException('Release artifacts require a Git checkout')
-        }
-        def output = new ByteArrayOutputStream()
-        exec {
-            commandLine 'git', 'status', '--porcelain', '--untracked-files=all'
-            standardOutput = output
-        }
-        if (!output.toString('UTF-8').trim().isEmpty()) {
-            throw new GradleException('Release artifacts require a clean worktree')
+        if (file('.git').exists()) {
+            def output = new ByteArrayOutputStream()
+            exec {
+                commandLine 'git', 'status', '--porcelain', '--untracked-files=all'
+                standardOutput = output
+            }
+            if (!output.toString('UTF-8').trim().isEmpty()) {
+                throw new GradleException('Release artifacts require a clean worktree')
+            }
+        } else if (!injectedSourceCommit.isPresent()) {
+            throw new GradleException(
+                    'Release artifacts require a clean Git checkout or canonical source snapshot')
         }
         sourceCommit()
     }
@@ -131,6 +137,7 @@ tasks.register('verifySourceArchive') {
             'gradle/verification-metadata.xml',
             'gradle/wrapper/gradle-wrapper.jar',
             'gradle/wrapper/gradle-wrapper.properties',
+            'scripts/verify-canonical-release.sh',
             'src/main/java/com/lambda/Debugger/IntegrationLauncher.java',
             'src/test/java/com/lambda/Debugger/IntegrationLauncherProcessTest.java',
             'docs/legal/COLLECTION-PROVENANCE.md',
@@ -203,7 +210,7 @@ tasks.register('generateReleaseMetadata') {
                 sha256 : sha256(vulnerabilityEvidence),
             ],
             canonicalBuildEnvironment: environmentValues,
-            buildCommand             : './gradlew --no-daemon clean verifyCanonicalRelease',
+            buildCommand             : './scripts/verify-canonical-release.sh',
         ]
         def output = releaseMetadataFile.get().asFile
         output.parentFile.mkdirs()

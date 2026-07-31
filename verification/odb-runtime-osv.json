@@ -3,7 +3,7 @@
   "scanner": {
     "name": "OSV API",
     "endpoint": "https://api.osv.dev/v1/querybatch",
-    "queriedOn": "2026-07-26"
+    "queriedOn": "2026-07-31"
   },
   "packages": [
     {
