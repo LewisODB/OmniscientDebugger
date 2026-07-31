@@ -76,10 +76,15 @@ def sourceArchiveFile = tasks.register('sourceArchive', Tar) {
         include 'gradle.lockfile'
         include 'gradlew.bat'
         include 'gradle/**'
-        include 'scripts/**'
         include 'src/**'
         include 'docs/legal/**'
         include 'verification/**'
+    }
+    from('scripts/verify-canonical-release.sh') {
+        into 'scripts'
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
     }
     from('gradlew') {
         filePermissions {
