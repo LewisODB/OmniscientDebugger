@@ -10,18 +10,37 @@ if [ -z "$container_image" ]; then
     echo "Canonical container image is missing from $canonical_properties." >&2
     exit 2
 fi
-if [ -n "$(git -C "$project_directory" status --porcelain --untracked-files=all)" ]; then
-    echo "Canonical release verification requires a clean worktree." >&2
+
+snapshot_checkout=false
+if git -C "$project_directory" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [ -n "$(git -C "$project_directory" status --porcelain --untracked-files=all)" ]; then
+        echo "Canonical release verification requires a clean worktree." >&2
+        exit 2
+    fi
+    source_commit=$(git -C "$project_directory" rev-parse HEAD)
+    snapshot_checkout=true
+elif [ -f "$project_directory/SOURCE-COMMIT" ]; then
+    source_commit=$(tr -d '\r\n' < "$project_directory/SOURCE-COMMIT")
+else
+    echo "Canonical release verification requires a Git checkout or source archive." >&2
+    exit 2
+fi
+case "$source_commit" in
+    *[!0-9a-f]*|'')
+        echo "Invalid source commit: $source_commit" >&2
+        exit 2
+        ;;
+esac
+if [ "${#source_commit}" -ne 40 ]; then
+    echo "Invalid source commit: $source_commit" >&2
     exit 2
 fi
 
-source_commit=$(git -C "$project_directory" rev-parse HEAD)
 container_uid=$(id -u)
 container_gid=$(id -g)
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/odb-canonical-release.XXXXXX")
 source_directory="$temporary_directory/source"
 canonical_output="$project_directory/build/canonical-release"
-mkdir "$source_directory"
 
 cleanup() {
     chmod -R u+w "$temporary_directory" 2>/dev/null || true
@@ -29,7 +48,12 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-git -C "$project_directory" archive --format=tar HEAD | tar -xf - -C "$source_directory"
+if [ "$snapshot_checkout" = true ]; then
+    mkdir "$source_directory"
+    git -C "$project_directory" archive --format=tar HEAD | tar -xf - -C "$source_directory"
+else
+    source_directory="$project_directory"
+fi
 
 docker run --rm \
     --platform linux/amd64 \
