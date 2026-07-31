@@ -16,6 +16,8 @@ if [ -n "$(git -C "$project_directory" status --porcelain --untracked-files=all)
 fi
 
 source_commit=$(git -C "$project_directory" rev-parse HEAD)
+container_uid=$(id -u)
+container_gid=$(id -g)
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/odb-canonical-release.XXXXXX")
 source_directory="$temporary_directory/source"
 canonical_output="$project_directory/build/canonical-release"
@@ -31,13 +33,17 @@ git -C "$project_directory" archive --format=tar HEAD | tar -xf - -C "$source_di
 
 docker run --rm \
     --platform linux/amd64 \
+    --user "$container_uid:$container_gid" \
     --env LC_ALL=C.UTF-8 \
     --env TZ=UTC \
-    --tmpfs /root/.gradle:rw,exec,size=2147483648 \
+    --env HOME=/tmp/odb-home \
+    --env GRADLE_USER_HOME=/tmp/gradle-home \
+    --tmpfs "/tmp/odb-home:rw,exec,uid=$container_uid,gid=$container_gid,size=16777216" \
+    --tmpfs "/tmp/gradle-home:rw,exec,uid=$container_uid,gid=$container_gid,size=2147483648" \
     --volume "$source_directory:/workspace" \
     --workdir /workspace \
     "$container_image" \
-    ./gradlew -PodbSourceCommit="$source_commit" --no-daemon clean verifyCanonicalRelease
+    ./gradlew -PodbSourceCommit="$source_commit" --no-daemon --no-watch-fs clean verifyCanonicalRelease
 
 rm -rf -- "$canonical_output"
 mkdir -p "$canonical_output"

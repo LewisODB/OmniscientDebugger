@@ -308,7 +308,8 @@ def rebuildTasks = rebuildRoots.withIndex().collect { rebuildRoot, index ->
         dependsOn extractTask
         inputs.file(sourceArchiveFile.flatMap { it.archiveFile })
         workingDir rebuildRoot
-        commandLine './gradlew', '--offline', '--no-daemon', 'clean', 'jar', 'verifyRuntimeArtifact'
+        commandLine './gradlew', '--offline', '--no-daemon', '--no-watch-fs',
+                'clean', 'jar', 'verifyRuntimeArtifact'
         outputs.file(rebuildRoot.map { it.file('build/libs/LewisOmniscientDebugger.jar') })
     }
 }
