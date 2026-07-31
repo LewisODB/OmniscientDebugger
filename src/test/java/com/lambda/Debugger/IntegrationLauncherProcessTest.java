@@ -181,6 +181,31 @@ public class IntegrationLauncherProcessTest {
     }
 
     @Test
+    public void integrationSourceRootsLoadSourceWithoutOpeningTheChooser() throws Exception {
+        Path state = Files.createTempDirectory("odb-integration-state");
+        Path sourceRoot = Files.createTempDirectory("odb source root ").toRealPath();
+        Path sourceFile = sourceRoot.resolve("outside/BehaviorTarget.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.copy(
+                new File("src/test/java/outside/BehaviorTarget.java").toPath(),
+                sourceFile);
+        Files.write(
+                state.resolve("source-roots.txt"),
+                Arrays.asList(sourceRoot.toString()),
+                StandardCharsets.UTF_8);
+
+        Result result = launchMain(
+                state,
+                TOKEN,
+                "com.lambda.Debugger.IntegrationSourceLookupHarness");
+
+        assertEquals(result.stderr, 0, result.exitCode);
+        assertTrue(result.stdout, result.stdout.contains("source-lines="));
+        assertTrue(result.stdout, result.stdout.contains("default-dont-record=5"));
+        assertFalse(result.stderr, result.stderr.contains("HeadlessException"));
+    }
+
+    @Test
     public void defaultsIoAndInternalInitializationFailuresAreExplicit() throws Exception {
         Path badDefaultsState = Files.createTempDirectory("odb-integration-state");
         Files.createDirectory(badDefaultsState.resolve(".debuggerDefaults"));

@@ -1,14 +1,19 @@
 package com.lambda.Debugger;
 
+import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.channels.Channels;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -19,6 +24,7 @@ import java.util.Arrays;
 final class IntegrationState {
     static final String STATE_PROPERTY = "com.lambda.Debugger.integration.stateDir";
     static final String TOKEN_PROPERTY = "com.lambda.Debugger.integration.token";
+    private static final String SOURCE_ROOTS_FILE = "source-roots.txt";
     private static final String PREFIX = "@@ODB-INTEGRATION@@\t";
     private static final String[] FORBIDDEN_PROPERTIES = {
         "DONT_INSTRUMENT",
@@ -122,6 +128,40 @@ final class IntegrationState {
 
     static boolean isActive() {
         return active != null;
+    }
+
+    static void loadSourceDirectories() {
+        if (active == null) {
+            return;
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                active.openInput(SOURCE_ROOTS_FILE), StandardCharsets.UTF_8))) {
+            String value;
+            while ((value = reader.readLine()) != null) {
+                Path root;
+                try {
+                    root = Paths.get(value);
+                } catch (InvalidPathException error) {
+                    continue;
+                }
+                if (!root.isAbsolute()) {
+                    continue;
+                }
+                root = root.normalize();
+                if (!Files.isDirectory(root)) {
+                    continue;
+                }
+                String directory = root.toString();
+                if (!directory.endsWith(File.separator)) {
+                    directory += File.separator;
+                }
+                if (!SourceFileFinder.sourceDirectories.contains(directory)) {
+                    SourceFileFinder.sourceDirectories.add(directory);
+                }
+            }
+        } catch (IOException ignored) {
+            // Missing or unreadable source roots preserve ODB's chooser fallback.
+        }
     }
 
     static String defaultsFile(String legacyPath) {

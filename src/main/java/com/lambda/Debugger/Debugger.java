@@ -1048,6 +1048,7 @@ public class Debugger extends JFrame {
         START = true;
         readCommandLineFlags();
         firstRun = Defaults.readDefaults();
+        IntegrationState.loadSourceDirectories();
         readCommandLineFlags();
         TimeStamp.initialize();
         programName = target;
