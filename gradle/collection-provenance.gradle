@@ -1,0 +1,135 @@
+def arrayListHistoryClassesDir = layout.buildDirectory.dir('verification/array-list-history/classes')
+def debuggerDebuggerGeneratedSourceDir = tasks.named('generateDebuggerDebuggerSources').map {
+    it.outputs.files.singleFile
+}
+tasks.register('prepareArrayListHistoryTarget', Sync) {
+    dependsOn tasks.named('testClasses')
+    from(sourceSets.test.output.classesDirs) {
+        include 'outside/ArrayListHistoryTarget.class'
+    }
+    into(arrayListHistoryClassesDir)
+}
+
+tasks.register('debugifyArrayListHistoryTarget', JavaExec) {
+    description = 'Pre-instrument the ArrayList history verification target'
+    group = 'verification'
+    dependsOn tasks.named('prepareArrayListHistoryTarget')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.lambda.Debugger.Debugify'
+
+    def debugifyOutput = new ByteArrayOutputStream()
+    standardOutput = debugifyOutput
+    errorOutput = debugifyOutput
+
+    doFirst {
+        args = [new File(arrayListHistoryClassesDir.get().asFile,
+                'outside/ArrayListHistoryTarget.class').absolutePath]
+    }
+    doLast {
+        def output = debugifyOutput.toString('UTF-8')
+        if (!output.isBlank()) {
+            logger.lifecycle(output.trim())
+        }
+        if (executionResult.get().exitValue != 0 || !(output =~ /debugified 1 files\./).find()) {
+            throw new GradleException('Failed to instrument ArrayList history verification target')
+        }
+    }
+}
+
+tasks.named('verifyDemoRecordings', Test) {
+    dependsOn tasks.named('debugifyArrayListHistoryTarget')
+
+    def jarFile = tasks.named('jar', Jar).get().archiveFile
+    def mainClasses = sourceSets.main.output.classesDirs.files
+    classpath = files(arrayListHistoryClassesDir) +
+            sourceSets.test.runtimeClasspath.filter { !mainClasses.contains(it) } +
+            files(jarFile)
+}
+
+tasks.register('verifyCollectionProvenance') {
+    description = 'Verify retained ODB collection compatibility classes and release exclusions'
+    group = 'verification'
+    dependsOn tasks.named('jar')
+    dependsOn tasks.named('compileDebuggerDebuggerJava')
+    dependsOn tasks.named('debuggerDebuggerJar')
+
+    doLast {
+        def expectedClasses = [
+            'com/lambda/Debugger/HashMapEq.class',
+            'com/lambda/Debugger/MyAbstractCollection.class',
+            'com/lambda/Debugger/MyAbstractList.class',
+            'com/lambda/Debugger/MyArrayList.class',
+            'com/lambda/Debugger/MyCollections.class',
+            'com/lambda/Debugger/SubList.class',
+            'com/lambda/Debugger/VectorD.class',
+        ]
+        def jarChecks = [
+            [
+                file: tasks.named('jar', Jar).get().archiveFile.get().asFile,
+                classes: expectedClasses,
+            ],
+            [
+                file: tasks.named('debuggerDebuggerJar', Jar).get().archiveFile.get().asFile,
+                classes: expectedClasses + expectedClasses.collect {
+                    it.replace('com/lambda/Debugger/', 'lambda/Debugger/')
+                },
+            ],
+        ]
+        jarChecks.each { check ->
+            def jarFile = check.file
+            def zip = new java.util.zip.ZipFile(jarFile)
+            try {
+                check.classes.each { entry ->
+                    if (zip.getEntry(entry) == null) {
+                        throw new GradleException("${jarFile.name} lacks retained compatibility class ${entry}")
+                    }
+                }
+                if (zip.entries().find { it.name.endsWith('LewisOmniscientDebugger-1.5.jar') }) {
+                    throw new GradleException("${jarFile.name} embeds the historical binary")
+                }
+            } finally {
+                zip.close()
+            }
+        }
+
+        def legacyJar = file('LewisOmniscientDebugger-1.5.jar')
+        if (legacyJar.exists()) {
+            throw new GradleException('Historical JAR must not remain in the source tree')
+        }
+
+        def rewrittenNames = [
+            'HashMapEq.java',
+            'VectorD.java',
+            'MyAbstractCollection.java',
+            'MyAbstractList.java',
+            'MyCollections.java',
+        ]
+        def forbiddenPhrases = [
+            'Sun Microsystems',
+            'confidential and proprietary information',
+            'Use is subject to license terms',
+        ]
+        def sourceRoots = [
+            file('src/main/java/com/lambda/Debugger'),
+            debuggerDebuggerGeneratedSourceDir.get().toPath()
+                    .resolve('lambda/Debugger').toFile(),
+        ]
+        sourceRoots.each { root ->
+            rewrittenNames.each { name ->
+                def source = new File(root, name)
+                if (!source.isFile()) {
+                    throw new GradleException("Missing retained collection source ${source}")
+                }
+                forbiddenPhrases.each { phrase ->
+                    if (source.getText('UTF-8').contains(phrase)) {
+                        throw new GradleException("${source} retains prohibited copied notice text: ${phrase}")
+                    }
+                }
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyCollectionProvenance')
+}

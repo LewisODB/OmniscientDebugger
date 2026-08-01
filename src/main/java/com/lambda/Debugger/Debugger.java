@@ -30,6 +30,7 @@ import java.awt.event.KeyEvent;
 import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Date;
 
 import javax.swing.AbstractListModel;
@@ -1041,6 +1042,63 @@ public class Debugger extends JFrame {
 
     } // Otherwise only create it when the user pushes STOP (StopButton.java)
 
+    static void runIntegration(String target, String[] targetArguments, boolean showController) {
+        println(version);
+        CMD_LINE = true;
+        START = true;
+        readCommandLineFlags();
+        firstRun = Defaults.readDefaults();
+        IntegrationState.loadSourceDirectories();
+        readCommandLineFlags();
+        TimeStamp.initialize();
+        programName = target;
+        classLoader = new DebugifyingClassLoader();
+        Thread.currentThread().setContextClassLoader(classLoader);
+        try {
+            clazz = classLoader.loadClass(programName);
+        } catch (ClassNotFoundException error) {
+            throw IntegrationState.fatal(
+                    "TARGET_CLASS_NOT_FOUND",
+                    "Could not load target class " + programName + ".",
+                    programName,
+                    error.toString(),
+                    1);
+        }
+        if (clazz.getClassLoader() != classLoader) {
+            throw IntegrationState.instrumentationFailed(
+                    programName,
+                    new IllegalStateException("Target was loaded without ODB instrumentation."));
+        }
+
+        Method mainMethod;
+        try {
+            mainMethod = clazz.getDeclaredMethod("main", new Class[] { String[].class });
+        } catch (Exception error) {
+            throw invalidIntegrationMain(error.toString());
+        }
+        int modifiers = mainMethod.getModifiers();
+        if (!Modifier.isPublic(modifiers) || !Modifier.isStatic(modifiers)
+                || mainMethod.getReturnType() != Void.TYPE) {
+            throw invalidIntegrationMain("Expected public static void main(String[]).");
+        }
+
+        D.enable();
+        if (showController) {
+            applyRecordingStartup(true);
+        }
+        IntegrationState.targetLoaded(programName);
+        runMain(clazz, new Object[] { targetArguments });
+    }
+
+    private static Error invalidIntegrationMain(String cause) {
+        return IntegrationState.fatal(
+                "MAIN_METHOD_INVALID",
+                "Target class " + programName + " must declare public static void main(String[]).",
+                programName,
+                cause,
+                1);
+    }
+
     private static void runMain(Class clazz, Object[] argList) {
         runTarget(clazz, argList);
         if (SHOW)
@@ -1052,11 +1110,13 @@ public class Debugger extends JFrame {
     public static synchronized void createDebugger() {
         if (mainFrame != null)
             return;
+        IntegrationState.requireUsefulRecording(TimeStamp.nTSCreated, TimeStamp.eott());
         // Somebody already created it. (Early STOP button is one way)
         mainFrame = new Debugger();
         mainFrame.initialize();
         mainFrame.pack();
         mainFrame.setVisible(true);
+        IntegrationState.debuggerReady(TimeStamp.nTSCreated, TimeStamp.eott());
         mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         ThreadPane.initialize();
         previousTime = TimeStamp.bot1();
@@ -1140,6 +1200,9 @@ public class Debugger extends JFrame {
             method = clazz.getDeclaredMethod("main",
                     new Class[] { String[].class });
         } catch (Exception e) {
+            if (IntegrationState.isActive()) {
+                throw IntegrationState.internalFailed("Target main method became unavailable.", e);
+            }
             System.out.println("There is no main(String[] argv) in " + clazz
                     + ".\n" + e);
             System.exit(1);
@@ -1219,7 +1282,14 @@ public class Debugger extends JFrame {
             return;
         Runnable r = new Runnable() {
             public void run() {
-                createDebugger();
+                try {
+                    createDebugger();
+                } catch (Throwable error) {
+                    if (IntegrationState.isActive()) {
+                        throw IntegrationState.internalFailed("Could not open the ODB debugger.", error);
+                    }
+                    throw error;
+                }
             }
         };
         SwingUtilities.invokeLater(r);

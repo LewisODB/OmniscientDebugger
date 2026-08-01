@@ -250,6 +250,9 @@ public class InstrumentorForCL {
 	catch (Exception e) {
 	    System.out.println("ODB: IMPOSSIBLE. Missing debugify");
 	    e.printStackTrace();
+	    if (IntegrationState.isActive()) {
+		throw IntegrationState.instrumentationFailed(name, e);
+	    }
 	    System.exit(1);
 	}
 	return b;

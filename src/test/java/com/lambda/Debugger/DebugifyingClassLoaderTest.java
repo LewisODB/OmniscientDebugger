@@ -1,8 +1,13 @@
 package com.lambda.Debugger;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+
+import java.lang.reflect.Method;
+import java.util.List;
 
 import org.junit.After;
 import org.junit.Before;
@@ -73,5 +78,32 @@ public class DebugifyingClassLoaderTest {
         Class clazz = loader.loadClass("com.sun.java.swing.plaf.motif.MotifLookAndFeel");
 
         assertNotSame(loader, clazz.getClassLoader());
+    }
+
+    @Test
+    public void instrumentationFailureKeepsLegacyParentFallback() throws Exception {
+        DebugifyingClassLoader loader = new DebugifyingClassLoader() {
+            protected Class findClass(String className, boolean instrument) {
+                throw new VerifyError("fixture failure");
+            }
+        };
+
+        Class clazz = loader.loadClass("outside.StrictFallbackTarget");
+
+        assertSame(getClass().getClassLoader(), clazz.getClassLoader());
+    }
+
+    @Test
+    public void arrayListAllocationUsesOdbRecordingImplementation() throws Exception {
+        DebugifyingClassLoader loader = new DebugifyingClassLoader();
+
+        Class target = loader.loadClass("outside.ArrayListRecordingTarget");
+        Method mutate = target.getMethod("mutate");
+        List values = (List) mutate.invoke(null);
+
+        assertSame(loader, target.getClassLoader());
+        assertEquals(MyArrayList.class, values.getClass());
+        assertEquals(1, values.size());
+        assertEquals("changed", values.get(0));
     }
 }

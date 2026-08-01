@@ -1354,6 +1354,9 @@ synchronized (D.class) {
 	}
 	catch (ClassNotFoundException e) {
 	    Debugger.println("createShadowClass can't find class. IMPOSSIBLE " + className);
+	    if (IntegrationState.isActive()) {
+		throw IntegrationState.internalFailed("ODB could not create a shadow class.", e);
+	    }
 	    System.exit(1);
 	}
 	return null;			// Never gets here

@@ -1,0 +1,334 @@
+configurations.runtimeClasspath.resolutionStrategy.activateDependencyLocking()
+
+def runtimeComponents = [
+    [
+        group      : 'commons-io',
+        name       : 'commons-io',
+        probeClass : 'org/apache/commons/io/IOUtils.class',
+        license    : 'Apache-2.0',
+        directory  : 'commons-io',
+    ],
+    [
+        group      : 'org.apache.bcel',
+        name       : 'bcel',
+        probeClass : 'org/apache/bcel/Const.class',
+        license    : 'Apache-2.0',
+        directory  : 'bcel',
+    ],
+    [
+        group      : 'org.apache.commons',
+        name       : 'commons-lang3',
+        probeClass : 'org/apache/commons/lang3/StringUtils.class',
+        license    : 'Apache-2.0',
+        directory  : 'commons-lang3',
+    ],
+    [
+        group      : 'org.ow2.asm',
+        name       : 'asm',
+        probeClass : 'org/objectweb/asm/ClassReader.class',
+        license    : 'BSD-3-Clause',
+    ],
+]
+def runtimeComponentKeys = runtimeComponents.collect { "${it.group}:${it.name}".toString() }.sort()
+def runtimeComponentByKey = runtimeComponents.collectEntries { [
+    ("${it.group}:${it.name}".toString()): it,
+] }
+def runtimeCoordinate = { artifact ->
+    def id = artifact.moduleVersion.id
+    "${id.group}:${artifact.name}:${id.version}".toString()
+}
+def runtimeSbomFile = layout.buildDirectory.file('reports/odb-runtime.cdx.json')
+def runtimeLegalDir = layout.buildDirectory.dir('generated/runtime-legal')
+def sha256 = { File artifact ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    artifact.withInputStream { input ->
+        def buffer = new byte[8192]
+        for (int read = input.read(buffer); read != -1; read = input.read(buffer)) {
+            digest.update(buffer, 0, read)
+        }
+    }
+    digest.digest().encodeHex().toString()
+}
+def sbomCoordinates = { sbom ->
+    sbom.components.collect {
+        it.properties.find { property -> property.name == 'lewisodb:coordinate' }.value
+    }.sort()
+}
+
+tasks.register('generateRuntimeSbom') {
+    description = 'Generate the CycloneDX inventory for the ODB runtime graph'
+    group = 'build'
+    inputs.files(configurations.runtimeClasspath)
+    inputs.property('runtimeComponents', runtimeComponents)
+    outputs.file(runtimeSbomFile)
+
+    doLast {
+        def components = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts.collect { artifact ->
+            def id = artifact.moduleVersion.id
+            def key = "${id.group}:${artifact.name}".toString()
+            def component = runtimeComponentByKey[key]
+            if (component == null) {
+                throw new GradleException("Unapproved runtime dependency ${runtimeCoordinate(artifact)}")
+            }
+            [
+                type       : 'library',
+                group      : id.group,
+                name       : artifact.name,
+                version    : id.version,
+                purl       : "pkg:maven/${id.group}/${artifact.name}@${id.version}",
+                hashes     : [[alg: 'SHA-256', content: sha256(artifact.file)]],
+                licenses   : [[license: [id: component.license]]],
+                properties : [[name: 'lewisodb:coordinate', value: runtimeCoordinate(artifact)]],
+            ]
+        }.sort { it.properties[0].value }
+
+        def bom = [
+            bomFormat   : 'CycloneDX',
+            specVersion : '1.5',
+            version     : 1,
+            metadata    : [component: [
+                type    : 'application',
+                group   : project.group.toString(),
+                name    : base.archivesName.get(),
+                version : project.version.toString(),
+            ]],
+            components  : components,
+        ]
+        def output = runtimeSbomFile.get().asFile
+        output.parentFile.mkdirs()
+        output.setText(
+                groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(bom)) + '\n',
+                'UTF-8')
+    }
+}
+
+tasks.register('prepareRuntimeLegal') {
+    description = 'Collect dependency licenses and notices for the ODB runtime JAR'
+    group = 'build'
+    inputs.files(configurations.runtimeClasspath)
+    inputs.property('runtimeComponents', runtimeComponents)
+    outputs.dir(runtimeLegalDir)
+
+    doLast {
+        def output = runtimeLegalDir.get().asFile
+        delete output
+        def artifacts = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+        runtimeComponents.findAll { it.directory }.each { component ->
+            def artifact = artifacts.find {
+                def id = it.moduleVersion.id
+                id.group == component.group && it.name == component.name
+            }
+            if (artifact == null) {
+                throw new GradleException("Runtime dependency ${component.group}:${component.name} is missing")
+            }
+            def zip = new java.util.zip.ZipFile(artifact.file)
+            try {
+                ['LICENSE.txt', 'NOTICE.txt'].each { fileName ->
+                    def entry = zip.getEntry("META-INF/${fileName}")
+                    if (entry == null) {
+                        throw new GradleException("${component.group}:${component.name} lacks META-INF/${fileName}")
+                    }
+                    def target = new File(output, "${component.directory}/${fileName}")
+                    target.parentFile.mkdirs()
+                    zip.getInputStream(entry).withCloseable { input ->
+                        target.withOutputStream { stream -> stream << input }
+                    }
+                }
+            } finally {
+                zip.close()
+            }
+        }
+    }
+}
+
+tasks.register('verifyRuntimeDependencies') {
+    description = 'Verify the locked ODB runtime dependency graph and Java 8 compatibility'
+    group = 'verification'
+    dependsOn tasks.named('generateRuntimeSbom')
+    inputs.file('verification/odb-runtime-osv.json')
+
+    doLast {
+        def artifacts = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+        def resolvedKeys = artifacts.collect {
+            "${it.moduleVersion.id.group}:${it.name}".toString()
+        }.sort()
+        if (resolvedKeys != runtimeComponentKeys) {
+            throw new GradleException("Runtime dependency graph differs from the approved graph: ${resolvedKeys}")
+        }
+
+        artifacts.each { artifact ->
+            def key = "${artifact.moduleVersion.id.group}:${artifact.name}".toString()
+            def component = runtimeComponentByKey[key]
+            def zip = new java.util.zip.ZipFile(artifact.file)
+            try {
+                def entry = zip.getEntry(component.probeClass)
+                if (entry == null) {
+                    throw new GradleException("${runtimeCoordinate(artifact)} lacks ${component.probeClass}")
+                }
+                def input = new DataInputStream(zip.getInputStream(entry))
+                try {
+                    if (input.readInt() != -889275714) {
+                        throw new GradleException("${runtimeCoordinate(artifact)} probe is not a class file")
+                    }
+                    input.readUnsignedShort()
+                    def majorVersion = input.readUnsignedShort()
+                    if (majorVersion > 52) {
+                        throw new GradleException(
+                                "${runtimeCoordinate(artifact)} requires class-file version "
+                                        + "${majorVersion}, above Java 8")
+                    }
+                } finally {
+                    input.close()
+                }
+            } finally {
+                zip.close()
+            }
+        }
+
+        def expectedCoordinates = artifacts.collect(runtimeCoordinate).sort()
+        def sbom = new groovy.json.JsonSlurper().parse(runtimeSbomFile.get().asFile)
+        if (sbom.bomFormat != 'CycloneDX'
+                || sbom.specVersion != '1.5'
+                || sbomCoordinates(sbom) != expectedCoordinates) {
+            throw new GradleException('Generated CycloneDX SBOM differs from the runtime graph')
+        }
+
+        def vulnerabilityEvidence = new groovy.json.JsonSlurper()
+                .parse(file('verification/odb-runtime-osv.json'))
+        def expectedPurls = artifacts.collect {
+            def id = it.moduleVersion.id
+            "pkg:maven/${id.group}/${it.name}@${id.version}".toString()
+        }.sort()
+        def evidencePurls = vulnerabilityEvidence.packages.collect { it.purl }.sort()
+        if (vulnerabilityEvidence.schemaVersion != 1
+                || evidencePurls != expectedPurls) {
+            throw new GradleException(
+                    'OSV evidence differs from the approved runtime graph')
+        }
+        def reportedVulnerabilities = vulnerabilityEvidence.packages.collectMany {
+            it.vulnerabilities ?: []
+        }
+        if (!reportedVulnerabilities.isEmpty()) {
+            throw new GradleException(
+                    "OSV evidence reports runtime vulnerabilities: ${reportedVulnerabilities}")
+        }
+    }
+}
+
+tasks.register('verifyRuntimeArtifact') {
+    description = 'Verify runtime inventory and legal files in the ODB fat JAR'
+    group = 'verification'
+    dependsOn tasks.named('jar')
+
+    doLast {
+        def jarFile = tasks.named('jar', Jar).get().archiveFile.get().asFile
+        def expectedEntries = [
+            'META-INF/odb-runtime.cdx.json',
+            'META-INF/third-party/asm/LICENSE.txt',
+            'META-INF/third-party/bcel/LICENSE.txt',
+            'META-INF/third-party/bcel/NOTICE.txt',
+            'META-INF/third-party/commons-io/LICENSE.txt',
+            'META-INF/third-party/commons-io/NOTICE.txt',
+            'META-INF/third-party/commons-lang3/LICENSE.txt',
+            'META-INF/third-party/commons-lang3/NOTICE.txt',
+        ]
+        def zip = new java.util.zip.ZipFile(jarFile)
+        try {
+            def requiredEntries = [
+                'com/lambda/Debugger/Debugger.class',
+                'com/lambda/Debugger/IntegrationLauncher.class',
+                'com/lambda/Debugger/IntegrationState.class',
+            ]
+            requiredEntries.each { entry ->
+                def requiredEntry = zip.getEntry(entry)
+                if (requiredEntry == null) {
+                    throw new GradleException("Runtime JAR lacks ${entry}")
+                }
+                def requiredInput = new DataInputStream(zip.getInputStream(requiredEntry))
+                try {
+                    requiredInput.readInt()
+                    requiredInput.readUnsignedShort()
+                    if (requiredInput.readUnsignedShort() != 52) {
+                        throw new GradleException(
+                                "${entry} is not compiled for Java 8 class version 52")
+                    }
+                } finally {
+                    requiredInput.close()
+                }
+            }
+            expectedEntries.each { entry ->
+                if (zip.getEntry(entry) == null) {
+                    throw new GradleException("Runtime JAR lacks ${entry}")
+                }
+            }
+            def forbiddenEntryPatterns = [
+                ~/^com\/lambda\/tests\//,
+                ~/^outside\//,
+                ~/^org\/junit\//,
+                ~/^META-INF\/versions\//,
+                ~/(^|\/)module-info\.class$/,
+                ~/\.(so|dll|dylib|jnilib)$/,
+                ~/LewisOmniscientDebugger-1\.5\.jar$/,
+            ]
+            zip.entries().each { entry ->
+                if (forbiddenEntryPatterns.any { pattern ->
+                    pattern.matcher(entry.name).find()
+                }) {
+                    throw new GradleException("Runtime JAR contains forbidden entry ${entry.name}")
+                }
+                if (entry.name.endsWith('.class')) {
+                    def classInput = new DataInputStream(zip.getInputStream(entry))
+                    try {
+                        if (classInput.readInt() != -889275714) {
+                            throw new GradleException("${entry.name} is not a valid class file")
+                        }
+                        classInput.readUnsignedShort()
+                        def majorVersion = classInput.readUnsignedShort()
+                        if (majorVersion > 52) {
+                            throw new GradleException(
+                                    "${entry.name} uses class-file version ${majorVersion}, "
+                                            + 'above Java 8')
+                        }
+                    } finally {
+                        classInput.close()
+                    }
+                }
+            }
+            def input = zip.getInputStream(zip.getEntry('META-INF/odb-runtime.cdx.json'))
+            try {
+                def sbom = new groovy.json.JsonSlurper().parse(input)
+                def expectedCoordinates = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                        .collect(runtimeCoordinate).sort()
+                if (sbomCoordinates(sbom) != expectedCoordinates) {
+                    throw new GradleException('Runtime JAR SBOM differs from the runtime graph')
+                }
+            } finally {
+                input.close()
+            }
+        } finally {
+            zip.close()
+        }
+    }
+}
+
+def addRuntimeMetadataToJar = { Jar jarTask ->
+    jarTask.dependsOn tasks.named('generateRuntimeSbom')
+    jarTask.dependsOn tasks.named('prepareRuntimeLegal')
+    jarTask.from(runtimeSbomFile) {
+        into 'META-INF'
+    }
+    jarTask.from(runtimeLegalDir) {
+        into 'META-INF/third-party'
+    }
+}
+
+tasks.withType(Jar).configureEach { jarTask ->
+    if (jarTask.name in ['jar', 'debuggerDebuggerJar']) {
+        addRuntimeMetadataToJar(jarTask)
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyRuntimeDependencies')
+    dependsOn tasks.named('verifyRuntimeArtifact')
+}

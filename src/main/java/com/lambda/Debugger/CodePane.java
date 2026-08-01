@@ -90,7 +90,7 @@ public class CodePane {
 	  
 	if (Debugger.DEMO) return getDemoList(sourceFileName);
 
-	ClassPath.ClassFile cf = Repository.lookupClassFile(className);
+	ClassPath.ClassFile cf = lookupClassFile(className);
 
 	if (cf != null) sourceFilePath = getSourceFileName(cf, sourceFileName);
 	else sourceFilePath = getSourceFileName(className, sourceFileName);
@@ -99,6 +99,16 @@ public class CodePane {
 	if (r == null) r = getReaderFN(sourceFileName, className); 
 	if (r == null) r = getReaderFN2(sourceFileName, className);
 	return(buildFileLines(r, sourceFileName));
+    }
+
+    static ClassPath.ClassFile lookupClassFile(String className) {
+	try {
+	    ClassPath classPath = Repository.getRepository().getClassPath();
+	    return classPath == null ? null : classPath.getClassFile(className);
+	}
+	catch (IOException e) {
+	    return null;
+	}
     }
 
     private static BufferedReader getReader(String sourceFilePath) {
@@ -183,4 +193,3 @@ public class CodePane {
 		System.out.println("Done.");
 	}
 }
-
